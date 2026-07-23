@@ -2,12 +2,7 @@ import assert from 'node:assert/strict'
 import { after, before, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { buildApp } from '../server/app.js'
-import {
-  challengeDigest,
-  normalizeName,
-  normalizePatientNumber,
-  sha256,
-} from '../server/auth.js'
+import { normalizeName, normalizePatientNumber, sha256 } from '../server/auth.js'
 import { loadConfig } from '../server/config.js'
 
 const config = {
@@ -15,14 +10,9 @@ const config = {
   publicOrigin: 'https://dental.test',
   databaseUrl: 'postgres://unused',
   sessionPepper: 'session-pepper-for-tests-only-000000000',
-  otpPepper: 'one-time-code-pepper-tests-000000000',
-  smsProvider: 'development',
-  devOtpCode: '123456',
   sessionIdleMinutes: 30,
   sessionAbsoluteHours: 8,
-  otpExpiryMinutes: 5,
-  otpMaxAttempts: 5,
-  loginStartMax: 50,
+  loginMaxAttempts: 50,
   loginWindowMinutes: 15,
 }
 
@@ -32,7 +22,6 @@ class MemoryStore {
       id: '10000000-0000-4000-8000-000000000001',
       displayName: 'Patricia Portal Demo',
       patientNumber: 'PT-DEMO01',
-      phone: '+639000000001',
       enabled: true,
     }
     this.otherPatientId = '10000000-0000-4000-8000-000000000002'
@@ -98,7 +87,6 @@ class MemoryStore {
         title: 'Other patient plan',
       },
     ]
-    this.challenges = new Map()
     this.sessions = new Map()
     this.audits = []
     this.healthy = true
@@ -108,101 +96,30 @@ class MemoryStore {
     if (!this.healthy) throw new Error('unavailable')
   }
 
-  async findPatientForLogin(name, number) {
-    return this.patient.enabled &&
-      name === normalizeName(this.patient.displayName) &&
-      number === this.patient.patientNumber
-      ? this.patient
-      : null
-  }
-
-  challengeWithinLimit(challenge) {
-    let ipCount = 0
-    let lookupCount = 0
-    for (const existing of this.challenges.values()) {
-      if (existing.createdAt < challenge.rateLimitSince) continue
-      if (existing.ipDigest === challenge.ipDigest) ipCount += 1
-      if (existing.lookupDigest === challenge.lookupDigest) lookupCount += 1
-    }
-    return (
-      ipCount < challenge.rateLimitMax &&
-      lookupCount < challenge.rateLimitMax
-    )
-  }
-
-  async createChallenge(challenge) {
-    const withinLimit = this.challengeWithinLimit(challenge)
-    const patientId = withinLimit ? challenge.patientId : null
-    for (const existing of this.challenges.values()) {
-      if (patientId && existing.patientId === patientId && !existing.usedAt) {
-        existing.usedAt = challenge.createdAt
-      }
-    }
-    this.challenges.set(challenge.id, {
-      ...challenge,
-      patientId,
-      codeDigest: patientId ? challenge.codeDigest : null,
-      attemptCount: 0,
-      usedAt: null,
-    })
-    return Boolean(patientId)
-  }
-
-  async invalidateChallenge(id, when) {
-    const challenge = this.challenges.get(id)
-    if (challenge && !challenge.usedAt) challenge.usedAt = when
-  }
-
-  async findChallengeForResend(id) {
-    const challenge = this.challenges.get(id)
-    return challenge
-      ? {
-          id,
-          lookupDigest: challenge.lookupDigest,
-          ipDigest: challenge.ipDigest,
-        }
-      : null
-  }
-
-  async replaceChallenge(challenge) {
-    const previous = this.challenges.get(challenge.previousId)
-    const deliverable = Boolean(
-      this.challengeWithinLimit(challenge) &&
-        previous &&
-        !previous.usedAt &&
-        previous.patientId &&
-        this.patient.enabled,
-    )
-    if (previous && !previous.usedAt) previous.usedAt = challenge.createdAt
-    this.challenges.set(challenge.id, {
-      ...challenge,
-      patientId: deliverable ? previous.patientId : null,
-      codeDigest: deliverable ? challenge.codeDigest : null,
-      attemptCount: 0,
-      usedAt: null,
-    })
-    return deliverable ? { patientId: this.patient.id, phone: this.patient.phone } : null
-  }
-
-  async verifyChallengeAndCreateSession(input) {
-    const challenge = this.challenges.get(input.challengeId)
+  async createSessionForLogin(input) {
     if (
-      !challenge ||
-      !challenge.patientId ||
-      challenge.usedAt ||
-      challenge.expiresAt <= input.now ||
-      challenge.attemptCount >= challenge.maxAttempts
+      !this.patient.enabled ||
+      input.normalizedName !== normalizeName(this.patient.displayName) ||
+      input.patientNumber !== this.patient.patientNumber
     ) {
+      this.audits.push({
+        actorType: 'anonymous',
+        action: 'portal.login_failed',
+        ...input.audit,
+      })
       return null
     }
-    challenge.attemptCount += 1
-    if (challenge.codeDigest !== input.codeDigest || !this.patient.enabled) return null
-    challenge.usedAt = input.now
     this.sessions.set(input.tokenDigest, {
       patient: this.patient,
       lastSeenAt: input.now,
       absoluteExpiresAt: input.absoluteExpiresAt,
       revokedAt: null,
+    })
+    this.audits.push({
+      actorType: 'patient',
+      actorId: this.patient.id,
+      action: 'portal.login_succeeded',
+      ...input.audit,
     })
     return this.patient
   }
@@ -285,12 +202,10 @@ let uuidCounter = 0
 const nextUuid = () =>
   `00000000-0000-4000-8000-${String(++uuidCounter).padStart(12, '0')}`
 const store = new MemoryStore()
-const delivered = []
 let currentTime = new Date('2026-07-23T00:00:00.000Z')
 const app = await buildApp({
   config,
   store,
-  sms: { sendOtp: async (phone, code) => delivered.push({ phone, code }) },
   now: () => new Date(currentTime),
   randomUUIDFn: nextUuid,
   randomBytesFn: () => Buffer.alloc(32, 7),
@@ -309,8 +224,8 @@ const post = (url, payload) =>
     payload,
   })
 
-const startKnownLogin = () =>
-  post('/api/auth/start', {
+const loginKnownPatient = () =>
+  post('/api/auth/login', {
     fullName: '  PATRICIA   PORTAL DEMO ',
     patientNumber: ' pt-demo01 ',
   })
@@ -325,11 +240,8 @@ test('normalization and production configuration security', () => {
         DATABASE_URL: 'postgres://db',
         PUBLIC_ORIGIN: 'http://dental.test',
         SESSION_PEPPER: 'replace-this-session-pepper-00000',
-        OTP_PEPPER: 'replace-this-otp-pepper-00000000',
-        SMS_PROVIDER: 'development',
-        DEV_OTP_CODE: '123456',
       }),
-    /forbidden in production/,
+    /Invalid configuration/,
   )
   assert.throws(
     () =>
@@ -338,8 +250,6 @@ test('normalization and production configuration security', () => {
         DATABASE_URL: 'postgres://db',
         PUBLIC_ORIGIN: 'http://dental.test',
         SESSION_PEPPER: 'session-pepper-for-tests-only-000000000',
-        OTP_PEPPER: 'one-time-code-pepper-tests-000000000',
-        SMS_PROVIDER: 'development',
       }),
     /NODE_ENV must be development, test, or production/,
   )
@@ -348,7 +258,7 @@ test('normalization and production configuration security', () => {
 test('state-changing requests require the configured Origin', async () => {
   const response = await app.inject({
     method: 'POST',
-    url: '/api/auth/start',
+    url: '/api/auth/login',
     payload: { fullName: 'Patricia Portal Demo', patientNumber: 'PT-DEMO01' },
   })
   assert.equal(response.statusCode, 403)
@@ -356,10 +266,10 @@ test('state-changing requests require the configured Origin', async () => {
 })
 
 test('request schemas reject missing and unexpected login fields', async () => {
-  const missing = await post('/api/auth/start', {
+  const missing = await post('/api/auth/login', {
     fullName: 'Patricia Portal Demo',
   })
-  const unexpected = await post('/api/auth/start', {
+  const unexpected = await post('/api/auth/login', {
     fullName: 'Patricia Portal Demo',
     patientNumber: 'PT-DEMO01',
     patientId: store.otherPatientId,
@@ -368,40 +278,49 @@ test('request schemas reject missing and unexpected login fields', async () => {
   assert.equal(unexpected.statusCode, 400)
 })
 
-test('known and unknown starts have equivalent public responses and store no plaintext OTP', async () => {
-  const known = await startKnownLogin()
-  const unknown = await post('/api/auth/start', {
+test('direct login returns a generic failure and exposes no OTP endpoints', async () => {
+  const auditCount = store.audits.length
+  const unknown = await post('/api/auth/login', {
     fullName: 'Unknown Demo Person',
     patientNumber: 'PT-NOBODY',
   })
-  assert.equal(known.statusCode, 202)
-  assert.equal(unknown.statusCode, 202)
-  assert.deepEqual(Object.keys(known.json()).sort(), Object.keys(unknown.json()).sort())
-  assert.equal(known.json().message, unknown.json().message)
-  assert.equal(delivered.at(-1).code, '123456')
-  const stored = store.challenges.get(known.json().challengeId)
-  assert.equal(stored.codeDigest, challengeDigest(config.otpPepper, stored.id, '123456'))
-  assert.notEqual(stored.codeDigest, '123456')
-  assert.equal(store.challenges.get(unknown.json().challengeId).codeDigest, null)
-  assert.equal(known.headers['cache-control'], 'no-store')
+  assert.equal(unknown.statusCode, 401)
+  assert.deepEqual(unknown.json(), {
+    error: {
+      code: 'INVALID_CREDENTIALS',
+      message: 'The name or patient ID is not recognized.',
+    },
+  })
+  assert.doesNotMatch(unknown.body, /Unknown Demo Person|PT-NOBODY/)
+  assert.equal(unknown.headers['cache-control'], 'no-store')
+  assert.deepEqual(
+    store.audits.slice(auditCount).map(({ actorType, action }) => ({
+      actorType,
+      action,
+    })),
+    [{ actorType: 'anonymous', action: 'portal.login_failed' }],
+  )
+
+  for (const url of [
+    '/api/auth/start',
+    '/api/auth/verify',
+    '/api/auth/resend',
+  ]) {
+    assert.equal((await post(url, {})).statusCode, 404)
+  }
 })
 
-test('OTP attempts, session cookie, authenticated access, and logout are enforced', async () => {
-  const started = await startKnownLogin()
-  const challengeId = started.json().challengeId
-  const wrong = await post('/api/auth/verify', { challengeId, code: '000000' })
-  assert.equal(wrong.statusCode, 401)
-  assert.equal(store.challenges.get(challengeId).attemptCount, 1)
-
-  const verified = await post('/api/auth/verify', { challengeId, code: '123456' })
-  assert.equal(verified.statusCode, 200)
-  assert.deepEqual(verified.json(), {
+test('direct login creates a hashed opaque session and logout revokes it', async () => {
+  const auditCount = store.audits.length
+  const loggedIn = await loginKnownPatient()
+  assert.equal(loggedIn.statusCode, 200)
+  assert.deepEqual(loggedIn.json(), {
     patient: {
       displayName: 'Patricia Portal Demo',
       patientNumber: 'PT-DEMO01',
     },
   })
-  const setCookie = verified.headers['set-cookie']
+  const setCookie = loggedIn.headers['set-cookie']
   assert.match(setCookie, /__Host-portal_session=/)
   assert.match(setCookie, /Secure/i)
   assert.match(setCookie, /HttpOnly/i)
@@ -411,9 +330,13 @@ test('OTP attempts, session cookie, authenticated access, and logout are enforce
   const rawToken = cookie.split('=')[1]
   assert.ok(store.sessions.has(sha256(rawToken)))
   assert.ok(!store.sessions.has(rawToken))
-
-  const replay = await post('/api/auth/verify', { challengeId, code: '123456' })
-  assert.equal(replay.statusCode, 401)
+  assert.deepEqual(
+    store.audits.slice(auditCount).map(({ actorType, action }) => ({
+      actorType,
+      action,
+    })),
+    [{ actorType: 'patient', action: 'portal.login_succeeded' }],
+  )
 
   const me = await app.inject({ url: '/api/me', headers: { cookie } })
   assert.equal(me.statusCode, 200)
@@ -429,64 +352,48 @@ test('OTP attempts, session cookie, authenticated access, and logout are enforce
   assert.equal(afterLogout.statusCode, 401)
 })
 
-test('expired OTPs fail and disabled portal access cannot create a session', async () => {
-  const expiredStart = await startKnownLogin()
-  store.challenges.get(expiredStart.json().challengeId).expiresAt =
-    new Date(currentTime.getTime() - 1)
-  const expired = await post('/api/auth/verify', {
-    challengeId: expiredStart.json().challengeId,
-    code: '123456',
-  })
-  assert.equal(expired.statusCode, 401)
-
-  const disabledStart = await startKnownLogin()
+test('disabled portal access cannot create a session', async () => {
   store.patient.enabled = false
-  const disabled = await post('/api/auth/verify', {
-    challengeId: disabledStart.json().challengeId,
-    code: '123456',
-  })
+  const disabled = await loginKnownPatient()
   store.patient.enabled = true
   assert.equal(disabled.statusCode, 401)
 })
 
-test('five incorrect OTP attempts lock the challenge and resend invalidates the old code', async () => {
-  const first = await startKnownLogin()
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    const response = await post('/api/auth/verify', {
-      challengeId: first.json().challengeId,
-      code: '000000',
-    })
-    assert.equal(response.statusCode, 401)
+test('direct login is rate-limited per client IP', async () => {
+  const limitedApp = await buildApp({
+    config: { ...config, loginMaxAttempts: 2 },
+    store: new MemoryStore(),
+    staticDir: false,
+    logger: false,
+  })
+  await limitedApp.ready()
+  try {
+    const payload = {
+      fullName: 'Unknown Demo Person',
+      patientNumber: 'PT-NOBODY',
+    }
+    const inject = () =>
+      limitedApp.inject({
+        method: 'POST',
+        url: '/api/auth/login',
+        headers: { origin: config.publicOrigin },
+        payload,
+      })
+    assert.equal((await inject()).statusCode, 401)
+    assert.equal((await inject()).statusCode, 401)
+    const limited = await inject()
+    assert.equal(limited.statusCode, 429, limited.body)
+  } finally {
+    await limitedApp.close()
   }
-  const locked = await post('/api/auth/verify', {
-    challengeId: first.json().challengeId,
-    code: '123456',
-  })
-  assert.equal(locked.statusCode, 401)
-
-  const second = await startKnownLogin()
-  const resent = await post('/api/auth/resend', {
-    challengeId: second.json().challengeId,
-  })
-  assert.equal(resent.statusCode, 202)
-  assert.notEqual(resent.json().challengeId, second.json().challengeId)
-  const oldCode = await post('/api/auth/verify', {
-    challengeId: second.json().challengeId,
-    code: '123456',
-  })
-  assert.equal(oldCode.statusCode, 401)
 })
 
 test('patient endpoints require authentication and enforce patient ownership and publication', async () => {
   const unauthenticated = await app.inject({ url: '/api/me/appointments' })
   assert.equal(unauthenticated.statusCode, 401)
 
-  const started = await startKnownLogin()
-  const verified = await post('/api/auth/verify', {
-    challengeId: started.json().challengeId,
-    code: '123456',
-  })
-  const cookie = verified.headers['set-cookie'].split(';')[0]
+  const loggedIn = await loginKnownPatient()
+  const cookie = loggedIn.headers['set-cookie'].split(';')[0]
 
   const appointments = await app.inject({
     url: '/api/me/appointments?scope=upcoming',
@@ -540,22 +447,14 @@ test('patient endpoints require authentication and enforce patient ownership and
 })
 
 test('idle and absolute session timeouts and health readiness fail closed', async () => {
-  const started = await startKnownLogin()
-  const verified = await post('/api/auth/verify', {
-    challengeId: started.json().challengeId,
-    code: '123456',
-  })
-  const cookie = verified.headers['set-cookie'].split(';')[0]
+  const loggedIn = await loginKnownPatient()
+  const cookie = loggedIn.headers['set-cookie'].split(';')[0]
   currentTime = new Date(currentTime.getTime() + 31 * 60_000)
   const expired = await app.inject({ url: '/api/me', headers: { cookie } })
   assert.equal(expired.statusCode, 401)
 
-  const absoluteStart = await startKnownLogin()
-  const absoluteVerified = await post('/api/auth/verify', {
-    challengeId: absoluteStart.json().challengeId,
-    code: '123456',
-  })
-  const absoluteCookie = absoluteVerified.headers['set-cookie'].split(';')[0]
+  const absoluteLogin = await loginKnownPatient()
+  const absoluteCookie = absoluteLogin.headers['set-cookie'].split(';')[0]
   const absoluteToken = absoluteCookie.split('=')[1]
   currentTime = new Date(currentTime.getTime() + 9 * 60 * 60_000)
   store.sessions.get(sha256(absoluteToken)).lastSeenAt = new Date(currentTime)
@@ -576,7 +475,6 @@ test('SPA deep links return the React application while unknown API routes stay 
   const staticApp = await buildApp({
     config,
     store: new MemoryStore(),
-    sms: { sendOtp: async () => {} },
     staticDir: fileURLToPath(new URL('./fixtures/static/', import.meta.url)),
     logger: false,
   })

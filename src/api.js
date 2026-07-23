@@ -52,19 +52,9 @@ async function request(path, { notifyUnauthorized = true, ...options } = {}) {
 const json = (body) => JSON.stringify(body)
 
 export const api = {
-  startLogin: (details) => request('/api/auth/start', {
+  login: (details) => request('/api/auth/login', {
     method: 'POST',
     body: json(details),
-    notifyUnauthorized: false,
-  }),
-  verifyLogin: (details) => request('/api/auth/verify', {
-    method: 'POST',
-    body: json(details),
-    notifyUnauthorized: false,
-  }),
-  resendCode: (challengeId) => request('/api/auth/resend', {
-    method: 'POST',
-    body: json({ challengeId }),
     notifyUnauthorized: false,
   }),
   logout: () => request('/api/auth/logout', {

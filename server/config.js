@@ -20,13 +20,11 @@ export function loadConfig(env = process.env) {
   const port = positiveInteger(env.PORT, 3000, 'PORT', errors)
   const databaseUrl = required(env.DATABASE_URL, 'DATABASE_URL', errors)
   const sessionPepper = required(env.SESSION_PEPPER, 'SESSION_PEPPER', errors)
-  const otpPepper = required(env.OTP_PEPPER, 'OTP_PEPPER', errors)
   const publicOriginValue = required(
     env.PUBLIC_ORIGIN || 'http://localhost:3000',
     'PUBLIC_ORIGIN',
     errors,
   )
-  const smsProvider = env.SMS_PROVIDER || 'development'
 
   if (!['development', 'test', 'production'].includes(nodeEnv)) {
     errors.push('NODE_ENV must be development, test, or production')
@@ -46,14 +44,7 @@ export function loadConfig(env = process.env) {
   if (sessionPepper && Buffer.byteLength(sessionPepper) < 32) {
     errors.push('SESSION_PEPPER must contain at least 32 bytes')
   }
-  if (otpPepper && Buffer.byteLength(otpPepper) < 32) {
-    errors.push('OTP_PEPPER must contain at least 32 bytes')
-  }
 
-  const smsApiUrl = env.SMS_API_URL?.trim() || ''
-  const smsApiToken = env.SMS_API_TOKEN?.trim() || ''
-  const smsSender = env.SMS_SENDER?.trim() || ''
-  const devOtpCode = env.DEV_OTP_CODE?.trim() || ''
   const sessionIdleMinutes = positiveInteger(
     env.SESSION_IDLE_MINUTES,
     30,
@@ -66,22 +57,10 @@ export function loadConfig(env = process.env) {
     'SESSION_ABSOLUTE_HOURS',
     errors,
   )
-  const otpExpiryMinutes = positiveInteger(
-    env.OTP_EXPIRY_MINUTES,
+  const loginMaxAttempts = positiveInteger(
+    env.LOGIN_MAX_ATTEMPTS,
     5,
-    'OTP_EXPIRY_MINUTES',
-    errors,
-  )
-  const otpMaxAttempts = positiveInteger(
-    env.OTP_MAX_ATTEMPTS,
-    5,
-    'OTP_MAX_ATTEMPTS',
-    errors,
-  )
-  const loginStartMax = positiveInteger(
-    env.LOGIN_START_MAX,
-    5,
-    'LOGIN_START_MAX',
+    'LOGIN_MAX_ATTEMPTS',
     errors,
   )
   const loginWindowMinutes = positiveInteger(
@@ -90,26 +69,6 @@ export function loadConfig(env = process.env) {
     'LOGIN_WINDOW_MINUTES',
     errors,
   )
-
-  if (!['development', 'http'].includes(smsProvider)) {
-    errors.push('SMS_PROVIDER must be development or http')
-  }
-  if (devOtpCode && !/^\d{6}$/.test(devOtpCode)) {
-    errors.push('DEV_OTP_CODE must contain exactly six digits')
-  }
-  if (smsProvider === 'http') {
-    if (!smsApiUrl) errors.push('SMS_API_URL is required for the http SMS provider')
-    if (!smsApiToken) errors.push('SMS_API_TOKEN is required for the http SMS provider')
-    if (!smsSender) errors.push('SMS_SENDER is required for the http SMS provider')
-    try {
-      const url = new URL(smsApiUrl)
-      if (nodeEnv === 'production' && url.protocol !== 'https:') {
-        errors.push('SMS_API_URL must use HTTPS in production')
-      }
-    } catch {
-      errors.push('SMS_API_URL must be a valid URL')
-    }
-  }
 
   if (nodeEnv === 'production') {
     if (databaseUrl) {
@@ -139,19 +98,10 @@ export function loadConfig(env = process.env) {
     if (publicOrigin && !publicOrigin.startsWith('https://')) {
       errors.push('PUBLIC_ORIGIN must use HTTPS in production')
     }
-    if (smsProvider === 'development') {
-      errors.push('SMS_PROVIDER=development is forbidden in production')
-    }
-    if (devOtpCode) {
-      errors.push('DEV_OTP_CODE is forbidden in production')
-    }
-    for (const [name, value] of [
-      ['SESSION_PEPPER', sessionPepper],
-      ['OTP_PEPPER', otpPepper],
-    ]) {
-      if (/replace|change|development|example/i.test(value || '')) {
-        errors.push(`${name} must not use a development placeholder in production`)
-      }
+    if (/replace|change|development|example/i.test(sessionPepper || '')) {
+      errors.push(
+        'SESSION_PEPPER must not use a development placeholder in production',
+      )
     }
   }
 
@@ -165,17 +115,9 @@ export function loadConfig(env = process.env) {
     databaseUrl,
     publicOrigin,
     sessionPepper,
-    otpPepper,
-    smsProvider,
-    smsApiUrl,
-    smsApiToken,
-    smsSender,
-    devOtpCode,
     sessionIdleMinutes,
     sessionAbsoluteHours,
-    otpExpiryMinutes,
-    otpMaxAttempts,
-    loginStartMax,
+    loginMaxAttempts,
     loginWindowMinutes,
   })
 }

@@ -48,34 +48,6 @@ const treatmentPlanSelect = `
 `
 
 export function createStore(db) {
-  const lockChallengeRateLimits = async (client, ipDigest, lookupDigest) => {
-    for (const digest of [ipDigest, lookupDigest].sort()) {
-      await client.query(
-        'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
-        [digest],
-      )
-    }
-  }
-
-  const challengeWithinLimit = async (
-    client,
-    { ipDigest, lookupDigest, since, max },
-  ) => {
-    const result = await client.query(
-      `SELECT
-         count(*) FILTER (WHERE ip_digest = $1)::integer AS ip_count,
-         count(*) FILTER (WHERE lookup_digest = $2)::integer AS lookup_count
-       FROM login_challenges
-       WHERE created_at >= $3
-         AND (ip_digest = $1 OR lookup_digest = $2)`,
-      [ipDigest, lookupDigest, since],
-    )
-    return (
-      (result.rows[0]?.ip_count || 0) < max &&
-      (result.rows[0]?.lookup_count || 0) < max
-    )
-  }
-
   const addAudit = async ({
     actorType,
     actorId = null,
@@ -147,155 +119,9 @@ export function createStore(db) {
       await db.query('SELECT 1')
     },
 
-    async findPatientForLogin(normalizedName, patientNumber) {
-      const result = await db.query(
-        `SELECT id, display_name, patient_number, phone_e164
-         FROM patients
-         WHERE normalized_name = $1
-           AND patient_number = $2
-           AND portal_enabled = true
-           AND phone_verified_at IS NOT NULL
-         LIMIT 1`,
-        [normalizedName, patientNumber],
-      )
-      return result.rows[0] || null
-    },
-
-    async createChallenge(challenge) {
-      return db.transaction(async (client) => {
-        await lockChallengeRateLimits(
-          client,
-          challenge.ipDigest,
-          challenge.lookupDigest,
-        )
-        const withinLimit = await challengeWithinLimit(client, {
-          ipDigest: challenge.ipDigest,
-          lookupDigest: challenge.lookupDigest,
-          since: challenge.rateLimitSince,
-          max: challenge.rateLimitMax,
-        })
-        const patientId = withinLimit ? challenge.patientId : null
-        const codeDigest = patientId ? challenge.codeDigest : null
-
-        if (patientId) {
-          await client.query(
-            `UPDATE login_challenges
-             SET used_at = $2
-             WHERE patient_id = $1 AND used_at IS NULL`,
-            [patientId, challenge.createdAt],
-          )
-        }
-        await client.query(
-          `INSERT INTO login_challenges (
-             id, patient_id, code_digest, expires_at, max_attempts,
-             lookup_digest, ip_digest, created_at
-           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-          [
-            challenge.id,
-            patientId,
-            codeDigest,
-            challenge.expiresAt,
-            challenge.maxAttempts,
-            challenge.lookupDigest,
-            challenge.ipDigest,
-            challenge.createdAt,
-          ],
-        )
-        return Boolean(patientId)
-      })
-    },
-
-    async invalidateChallenge(id, when) {
-      await db.query(
-        'UPDATE login_challenges SET used_at = $2 WHERE id = $1 AND used_at IS NULL',
-        [id, when],
-      )
-    },
-
-    async findChallengeForResend(id) {
-      const result = await db.query(
-        `SELECT id, lookup_digest, ip_digest
-         FROM login_challenges
-         WHERE id = $1`,
-        [id],
-      )
-      return result.rows[0]
-        ? {
-            id: result.rows[0].id,
-            lookupDigest: result.rows[0].lookup_digest,
-            ipDigest: result.rows[0].ip_digest,
-          }
-        : null
-    },
-
-    async replaceChallenge({
-      previousId,
-      id,
-      codeDigest,
-      expiresAt,
-      maxAttempts,
-      lookupDigest,
-      ipDigest,
-      createdAt,
-      rateLimitSince,
-      rateLimitMax,
-    }) {
-      return db.transaction(async (client) => {
-        await lockChallengeRateLimits(client, ipDigest, lookupDigest)
-        const withinLimit = await challengeWithinLimit(client, {
-          ipDigest,
-          lookupDigest,
-          since: rateLimitSince,
-          max: rateLimitMax,
-        })
-        const source = await client.query(
-          `SELECT c.patient_id, c.used_at, p.phone_e164,
-                  p.portal_enabled, p.phone_verified_at
-           FROM login_challenges c
-           LEFT JOIN patients p ON p.id = c.patient_id
-           WHERE c.id = $1
-           FOR UPDATE OF c`,
-          [previousId],
-        )
-        const row = source.rows[0]
-        const deliverable = Boolean(
-          withinLimit &&
-            row &&
-            !row.used_at &&
-            row.patient_id &&
-            row.portal_enabled &&
-            row.phone_verified_at,
-        )
-
-        if (row && !row.used_at) {
-          await client.query('UPDATE login_challenges SET used_at = $2 WHERE id = $1', [
-            previousId,
-            createdAt,
-          ])
-        }
-        await client.query(
-          `INSERT INTO login_challenges (
-             id, patient_id, code_digest, expires_at, max_attempts,
-             lookup_digest, ip_digest, created_at
-           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-          [
-            id,
-            deliverable ? row.patient_id : null,
-            deliverable ? codeDigest : null,
-            expiresAt,
-            maxAttempts,
-            lookupDigest,
-            ipDigest,
-            createdAt,
-          ],
-        )
-        return deliverable ? { patientId: row.patient_id, phone: row.phone_e164 } : null
-      })
-    },
-
-    async verifyChallengeAndCreateSession({
-      challengeId,
-      codeDigest,
+    async createSessionForLogin({
+      normalizedName,
+      patientNumber,
       sessionId,
       tokenDigest,
       now,
@@ -304,53 +130,46 @@ export function createStore(db) {
     }) {
       return db.transaction(async (client) => {
         const result = await client.query(
-          `UPDATE login_challenges c
-           SET attempt_count = c.attempt_count + 1,
-               used_at = CASE
-                 WHEN c.code_digest = $2
-                   AND p.portal_enabled = true
-                   AND p.phone_verified_at IS NOT NULL
-                 THEN $3
-                 ELSE c.used_at
-               END
-           FROM patients p
-           WHERE c.id = $1
-             AND c.patient_id = p.id
-             AND c.used_at IS NULL
-             AND c.expires_at > $3
-             AND c.attempt_count < c.max_attempts
-           RETURNING c.patient_id, p.display_name, p.patient_number,
-             (c.code_digest = $2
-               AND p.portal_enabled = true
-               AND p.phone_verified_at IS NOT NULL) AS verified`,
-          [challengeId, codeDigest, now],
+          `SELECT id, display_name, patient_number
+           FROM patients
+           WHERE normalized_name = $1
+             AND patient_number = $2
+             AND portal_enabled = true
+           LIMIT 1`,
+          [normalizedName, patientNumber],
         )
         const row = result.rows[0]
-        if (!row?.verified) return null
 
-        await client.query(
-          `INSERT INTO portal_sessions (
-             id, patient_id, token_digest, created_at, last_seen_at, absolute_expires_at
-           ) VALUES ($1, $2, $3, $4, $4, $5)`,
-          [sessionId, row.patient_id, tokenDigest, now, absoluteExpiresAt],
-        )
+        if (row) {
+          await client.query(
+            `INSERT INTO portal_sessions (
+               id, patient_id, token_digest, created_at, last_seen_at,
+               absolute_expires_at
+             ) VALUES ($1, $2, $3, $4, $4, $5)`,
+            [sessionId, row.id, tokenDigest, now, absoluteExpiresAt],
+          )
+        }
         await client.query(
           `INSERT INTO audit_events (
              actor_type, actor_id, action, occurred_at, request_id, ip_digest, user_agent
-           ) VALUES ('patient', $1, 'portal.login_succeeded', $2, $3, $4, $5)`,
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
           [
-            row.patient_id,
+            row ? 'patient' : 'anonymous',
+            row?.id || null,
+            row ? 'portal.login_succeeded' : 'portal.login_failed',
             now,
             audit.requestId,
             audit.ipDigest,
             audit.userAgent?.slice(0, 512) || null,
           ],
         )
-        return {
-          id: row.patient_id,
-          displayName: row.display_name,
-          patientNumber: row.patient_number,
-        }
+        return row
+          ? {
+              id: row.id,
+              displayName: row.display_name,
+              patientNumber: row.patient_number,
+            }
+          : null
       })
     },
 
@@ -365,7 +184,6 @@ export function createStore(db) {
            AND s.absolute_expires_at > $2
            AND s.last_seen_at >= $3
            AND p.portal_enabled = true
-           AND p.phone_verified_at IS NOT NULL
          RETURNING s.id AS session_id, p.id, p.display_name, p.patient_number`,
         [tokenDigest, now, idleCutoff],
       )

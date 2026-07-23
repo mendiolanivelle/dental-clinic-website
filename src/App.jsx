@@ -10,7 +10,6 @@ import LoginPage from './pages/LoginPage'
 import ProfilePage from './pages/ProfilePage'
 import RecordsPage from './pages/RecordsPage'
 import TreatmentPlanPage from './pages/TreatmentPlanPage'
-import VerifyPage from './pages/VerifyPage'
 import { patientFrom } from './portalData'
 
 function AppLoading() {
@@ -103,13 +102,7 @@ export default function App() {
         path="/login"
         element={authenticated
           ? <Navigate replace to="/portal" />
-          : <LoginPage />}
-      />
-      <Route
-        path="/verify"
-        element={authenticated
-          ? <Navigate replace to="/portal" />
-          : <VerifyPage onAuthenticated={handleAuthenticated} />}
+          : <LoginPage onAuthenticated={handleAuthenticated} />}
       />
       <Route
         path="/portal"

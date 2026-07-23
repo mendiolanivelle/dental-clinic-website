@@ -6,11 +6,10 @@ import cookie from '@fastify/cookie'
 import helmet from '@fastify/helmet'
 import rateLimit from '@fastify/rate-limit'
 import fastifyStatic from '@fastify/static'
-import { randomBytes, randomInt, randomUUID } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { authRequiredError, SESSION_COOKIE, sha256 } from './auth.js'
 import { loadConfig } from './config.js'
 import { createDatabase } from './db.js'
-import { createSmsSender } from './sms.js'
 import { createStore } from './store.js'
 import authRoutes from './routes/auth.js'
 import healthRoutes from './routes/health.js'
@@ -23,9 +22,7 @@ export async function buildApp({
   config = loadConfig(),
   db,
   store,
-  sms,
   now = () => new Date(),
-  randomIntFn = randomInt,
   randomBytesFn = randomBytes,
   randomUUIDFn = randomUUID,
   staticDir = defaultStaticDirectory,
@@ -60,7 +57,6 @@ export async function buildApp({
     ownedDatabase = db || createDatabase(config)
     store = createStore(ownedDatabase)
   }
-  sms ||= createSmsSender(config)
 
   await app.register(cookie)
   await app.register(helmet, {
@@ -73,15 +69,7 @@ export async function buildApp({
       },
     },
   })
-  await app.register(rateLimit, {
-    global: false,
-    errorResponseBuilder: () => ({
-      error: {
-        code: 'RATE_LIMITED',
-        message: 'Too many attempts. Please wait and try again.',
-      },
-    }),
-  })
+  await app.register(rateLimit, { global: false })
 
   app.decorateRequest('patient', null)
   app.decorate('authenticate', async (request, reply) => {
@@ -137,10 +125,8 @@ export async function buildApp({
   await app.register(healthRoutes, { store })
   await app.register(authRoutes, {
     store,
-    sms,
     config,
     now,
-    randomInt: randomIntFn,
     randomBytes: randomBytesFn,
     randomUUID: randomUUIDFn,
   })
@@ -167,7 +153,6 @@ export async function buildApp({
       request.method === 'GET' &&
       (request.url === '/' ||
         request.url.startsWith('/login') ||
-        request.url.startsWith('/verify') ||
         request.url.startsWith('/portal'))
     ) {
       return reply.type('text/html').sendFile('index.html')

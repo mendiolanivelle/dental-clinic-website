@@ -1,12 +1,11 @@
 import { useState } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
 import { ArrowRight, IdCard, LockKeyhole, Phone, UserRound } from 'lucide-react'
 import { api } from '../api'
 import AuthLayout from '../components/AuthLayout'
 import ClinicPhoneLink from '../components/ClinicPhoneLink'
 
-export default function LoginPage() {
-  const navigate = useNavigate()
+export default function LoginPage({ onAuthenticated }) {
   const location = useLocation()
   const [fullName, setFullName] = useState('')
   const [patientNumber, setPatientNumber] = useState('')
@@ -24,23 +23,13 @@ export default function LoginPage() {
 
     setSubmitting(true)
     try {
-      const result = await api.startLogin({
+      const result = await api.login({
         fullName: fullName.trim(),
         patientNumber: patientNumber.trim().toUpperCase(),
       })
-
-      if (!result?.challengeId) throw new Error('Missing login challenge')
-
-      navigate('/verify', {
-        replace: true,
-        state: {
-          challengeId: result.challengeId,
-          startedAt: Date.now(),
-          message: result.message,
-        },
-      })
+      onAuthenticated(result.patient)
     } catch {
-      setError('We could not start verification. Please try again or call the clinic for help.')
+      setError('The name or patient ID is not recognized. Please check both details or call the clinic.')
     } finally {
       setSubmitting(false)
     }
@@ -117,7 +106,7 @@ export default function LoginPage() {
           type="submit"
           disabled={submitting}
         >
-          {submitting ? 'Checking details…' : 'Continue securely'}
+          {submitting ? 'Signing in…' : 'Open my portal'}
           {!submitting && <ArrowRight size={18} />}
         </button>
       </form>
@@ -125,12 +114,12 @@ export default function LoginPage() {
       <div className="mt-6 flex gap-3 rounded-2xl bg-mint/65 p-4">
         <LockKeyhole className="mt-0.5 shrink-0 text-brand" size={18} />
         <p className="text-xs leading-5 text-ink/60">
-          No password is required. We will verify the mobile number registered with the clinic.
+          Use the exact full name and patient ID recorded by the clinic.
         </p>
       </div>
 
       <div className="mt-6 border-t border-ink/8 pt-5 text-center">
-        <p className="text-xs text-ink/50">Don’t have your patient ID or registered mobile?</p>
+        <p className="text-xs text-ink/50">Don’t have your patient ID?</p>
         <ClinicPhoneLink className="mt-2 inline-flex items-center gap-1.5 text-sm font-extrabold text-brand hover:text-brand-dark">
           <Phone size={15} />
           Call the clinic

@@ -14,11 +14,6 @@ const productionEnv = (databaseUrl) => ({
   PUBLIC_ORIGIN: 'https://dental.test',
   DATABASE_URL: databaseUrl,
   SESSION_PEPPER: 'a'.repeat(64),
-  OTP_PEPPER: 'b'.repeat(64),
-  SMS_PROVIDER: 'http',
-  SMS_API_URL: 'https://sms.test/send',
-  SMS_API_TOKEN: 'test-sms-token',
-  SMS_SENDER: 'SmileCare',
 })
 
 test('Supabase database options pin its CA, strip URL SSL overrides, and set the private search path', () => {
@@ -45,14 +40,18 @@ test('Supabase database options pin its CA, strip URL SSL overrides, and set the
   assert.equal(local.options, '-c search_path=dental_portal,public')
 })
 
-test('the backend database role receives only the operations used by the portal', async () => {
-  const sql = await readFile(
+test('the backend role stays least-privilege and the forward migration removes OTP data', async () => {
+  const securitySql = await readFile(
     new URL('../migrations/002_supabase_security.sql', import.meta.url),
     'utf8',
   )
-  const compact = sql.replace(/\s+/g, ' ')
+  const removalSql = await readFile(
+    new URL('../migrations/003_remove_sms_otp.sql', import.meta.url),
+    'utf8',
+  )
+  const compact = securitySql.replace(/\s+/g, ' ')
 
-  assert.doesNotMatch(sql, /\bDELETE\b/)
+  assert.doesNotMatch(securitySql, /\bDELETE\b/)
   assert.doesNotMatch(compact, /GRANT [^;]* ON ALL TABLES/i)
   assert.match(
     compact,
@@ -67,6 +66,14 @@ test('the backend database role receives only the operations used by the portal'
     /GRANT INSERT ON dental_portal\.audit_events TO dental_portal_backend;/,
   )
   assert.doesNotMatch(compact, /GRANT [^;]*schema_migrations/i)
+
+  assert.match(
+    removalSql,
+    /DROP TABLE IF EXISTS dental_portal\.login_challenges\s*;/,
+  )
+  assert.doesNotMatch(removalSql, /\bCASCADE\b/i)
+  assert.doesNotMatch(removalSql, /\bpublic\./i)
+  assert.doesNotMatch(removalSql, /DROP TABLE[^;]*portal_sessions/i)
 })
 
 test('production permits Supabase direct/session connections and rejects other hosts or transaction pooling', () => {
@@ -141,7 +148,16 @@ test('Management API migrations are ordered, checksummed, and never place the ac
     JSON.parse(calls[1].options.body).query,
     /information_schema\.tables/,
   )
-  assert.match(JSON.parse(calls.at(-1).options.body).query, /ENABLE ROW LEVEL SECURITY/)
+  const migrationQueries = calls
+    .slice(2)
+    .map((call) => JSON.parse(call.options.body).query)
+  assert.ok(
+    migrationQueries.some((query) => /ENABLE ROW LEVEL SECURITY/.test(query)),
+  )
+  assert.match(
+    migrationQueries.at(-1),
+    /DROP TABLE IF EXISTS dental_portal\.login_challenges/,
+  )
   for (const call of calls) {
     assert.equal(call.options.body.includes(token), false)
   }

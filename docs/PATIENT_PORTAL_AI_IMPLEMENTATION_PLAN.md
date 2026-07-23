@@ -1,939 +1,477 @@
-# AI Implementation Specification: Dental Patient Portal
+# Patient Portal Direct-Login Implementation Plan
 
-## 1. Instruction to the Implementing AI
+Status: final implementation contract
 
-You are extending an existing React, Vite, and Tailwind CSS dental website into
-a secure, passwordless patient portal.
+Audience: coding agents and maintainers
 
-Implement this specification in order. Do not replace the current visual design.
-Do not expose real patient data until every release gate in this document passes.
-Do not weaken the authentication flow to full name and patient ID alone.
+Application: SmileCare Dental Patient Portal
 
-Before editing:
+## 1. Objective
 
-1. Read the entire repository and this specification.
-2. Check `git status` and preserve unrelated user changes.
-3. Confirm the current application builds.
-4. State any assumptions that differ from this document.
-5. Work phase by phase, running the listed checks after each phase.
+Provide a simple, read-only patient portal where a patient enters:
 
-When a requirement is unclear, choose the safest minimal behavior and document
-the assumption. Stop and ask the user only when a missing decision affects
-security, real patient data, an external provider, or destructive changes.
+1. the full name stored by the clinic; and
+2. the clinic-issued patient ID.
 
-## 2. Product Objective
+If both values match an enabled patient, open an authenticated portal session.
+There is no self-registration, password, SMS, or one-time-code flow.
 
-Build a responsive portal where a clinic-created patient can:
+Patients can view:
 
-- Log in without registering or creating a password.
-- Enter their full name and patient ID as lookup information.
-- Prove possession of the mobile number verified by clinic staff using a
-  short-lived one-time code.
-- View only their own upcoming appointments.
-- View completed treatment history published for the patient.
-- View an active treatment plan and recommended next visit.
-- Contact the clinic or request assistance with rescheduling.
-- Log out securely.
+- their profile summary;
+- upcoming and past dental appointments;
+- published clinical record summaries; and
+- their active published treatment plan.
 
-The first release is read-only. Patients must not directly create, edit, cancel,
-or reschedule appointments in the database.
+## 2. Security boundary
 
-## 3. Non-Negotiable Decisions
+The full name is not secret. In this design, the patient ID is the private
+credential.
 
-These decisions are fixed unless the product owner explicitly changes them:
+Production patient IDs must therefore be:
 
-1. Full name and patient ID are identifiers, not authentication secrets.
-2. Real records require a second verification step using a one-time SMS code.
-3. There is no public patient registration page.
-4. Clinic staff pre-provisions patients and verifies their mobile numbers.
-5. Patient-facing IDs are random and non-sequential.
-6. The portal is served from the existing origin:
-   `https://dental.exodiagamedev.com`.
-7. The React application and API are served by one Node process on port `3000`.
-8. Production uses Supabase-hosted PostgreSQL through a least-privilege
-   Supavisor session-mode connection on port `5432`.
-9. Authentication uses an opaque server-side session and an HttpOnly cookie.
-10. Authentication tokens, OTPs, and clinical data must never be stored in
-    `localStorage` or `sessionStorage`.
-11. The server derives the current patient from the session. The client never
-    selects a patient by sending a `patient_id`.
-12. Only records with a publication timestamp may be returned to a patient.
-13. Internal clinical notes are not part of the patient portal MVP.
-14. The MVP does not include billing, chat, X-rays, document uploads, online
-    payments, or direct booking.
-15. Use JavaScript, matching the current repository. Do not migrate the project
-    to TypeScript as part of this feature.
+- generated from a cryptographically secure random source;
+- long enough to resist online and offline guessing;
+- non-sequential and unrelated to chart numbers, birthdays, phone numbers, or
+  other patient information;
+- disclosed privately to the patient; and
+- replaceable immediately if lost or exposed.
 
-## 4. Current Repository State
+Do not use the fictional `PT-DEMO01` seed format in production.
 
-The current project is a static prototype:
+Direct name-and-ID login is weaker than multi-factor authentication. This is an
+accepted product constraint, not permission to weaken session handling,
+rate-limiting, authorization, audit, transport security, or database isolation.
 
-- React, Vite, Tailwind CSS, and Lucide React are installed.
-- `src/App.jsx` contains hard-coded patient and appointment data.
-- Sidebar buttons change only local visual state.
-- There is no router, API, authentication, database, or test suite.
-- The current Docker image serves static files with Nginx on port `3000`.
+## 3. Non-negotiable requirements
 
-The implementation must preserve the existing responsive sidebar style while
-replacing mock patient data with authenticated API data.
+An implementation is incomplete unless all of these remain true:
 
-## 5. Scope
+- The browser calls only same-origin Fastify endpoints.
+- Supabase Auth, the Supabase browser SDK, and the Supabase Data API are not
+  used for portal authentication or patient data.
+- Login has strict per-client rate limiting.
+- Unknown, disabled, and mismatched accounts receive the same generic error.
+- Request bodies, cookies, names, patient IDs, session tokens, and clinical
+  content are not written to application logs.
+- A successful login creates a new opaque random session token.
+- Only a SHA-256 digest of the session token is stored in PostgreSQL.
+- The raw token is sent only in a `Secure`, `HttpOnly`, `SameSite=Lax`,
+  host-only cookie.
+- Sessions enforce both idle and absolute expiry.
+- Every protected query derives the patient ID from the authenticated session,
+  never from a browser-supplied patient selector.
+- Only published patient-safe clinical summaries are returned.
+- Login and protected-record access create audit events without storing raw
+  credentials or clinical content in the audit metadata.
+- The Supabase runtime role has least privilege and uses verified TLS.
+- Supabase API roles cannot access the private portal schema.
 
-### 5.1 Patient routes
-
-- `/login`
-- `/verify`
-- `/portal`
-- `/portal/appointments`
-- `/portal/records`
-- `/portal/treatment-plan`
-- `/portal/profile`
-
-Unauthenticated access to any `/portal/*` route redirects to `/login`.
-Authenticated access to `/login` or `/verify` redirects to `/portal`.
-
-### 5.2 Patient features
-
-- Passwordless login
-- OTP verification
-- Secure logout
-- Session-expired handling
-- Dashboard summary
-- Upcoming and past appointments
-- Published treatment history
-- Current treatment plan
-- Recommended or overdue care
-- Clinic contact and reschedule-assistance action
-- Loading, empty, error, and offline states
-- Mobile sidebar drawer and desktop sidebar
-
-### 5.3 Explicitly deferred
-
-- Patient self-registration
-- Password login
-- Patient editing of clinical data
-- Direct calendar booking or cancellation
-- Payments and billing
-- Messaging
-- Attachments, X-rays, and prescriptions
-- Push notifications
-- Native mobile application
-- Multi-clinic support
-- Microservices, Redis, queues, GraphQL, Redux, and an ORM
-- Passkeys, until the SMS OTP MVP is stable
-- Guardian access, unless minors are approved for the production pilot
-
-If the clinic serves minors, adult-only access is a release gate. Do not give
-minors production portal access until verified guardian relationships and
-guardian accounts are implemented.
-
-## 6. Required Architecture
+## 4. Architecture
 
 ```text
-Cloudflare
-  -> Coolify proxy
-     -> Node application on port 3000
-        -> serves built React files
-        -> exposes same-origin /api routes
-        -> sends OTP through an approved SMS provider
-        -> connects over verified TLS to Supabase-hosted PostgreSQL
-        -> records security audit events
+Browser
+  React + React Router + Tailwind CSS
+        |
+        | same-origin HTTPS /api/*
+        v
+Fastify
+  validation
+  origin checks
+  rate limiting
+  opaque session cookie
+  patient authorization
+  audit events
+        |
+        | verified PostgreSQL TLS
+        v
+Supabase PostgreSQL
+  private dental_portal schema
+  least-privilege dental_portal_app login
+  RLS as defense in depth
 ```
 
-Use a single persistent application container and Supabase-hosted PostgreSQL.
-The Coolify runtime connects through Supavisor session mode on port `5432`;
-transaction mode on port `6543` is not appropriate for this persistent server.
-Do not create a separate public API domain. Same-origin API calls avoid
-unnecessary CORS and cookie complexity.
+Fastify serves the built React application and the API from container port
+`3000`. A separate Nginx runtime is not required.
 
-Fastify remains the only application API and authentication boundary. Do not
-add the Supabase browser SDK, expose a publishable or service-role key to React,
-or query the Supabase Data API from the browser. Supabase Auth sessions are not
-interchangeable with the portal's custom OTP and opaque server-side sessions.
+## 5. Frontend contract
 
-### 6.1 Required dependencies
+### 5.1 Public route
 
-Use the smallest stable set:
+`/login`
 
-- Existing React, React DOM, Vite, Tailwind CSS, and Lucide React
-- `react-router-dom`
-- `fastify`
-- `@fastify/cookie`
-- `@fastify/helmet`
-- `@fastify/rate-limit`
-- `@fastify/static`
-- `pg`
+The form contains exactly:
 
-Use Node's built-in `crypto`, `fetch`, and `node:test` where possible. Do not
-add an ORM, Axios, Redux, React Query, a validation framework, or a logging
-platform for the MVP. Do not add `@supabase/supabase-js`; the existing `pg`
-driver is the correct connection layer for Supabase-hosted PostgreSQL. Use
-Fastify JSON schemas for request validation and Fastify's `inject` for API
-tests.
+- `fullName`
+- `patientNumber`
 
-### 6.2 Suggested file structure
+On submit:
 
-Keep the structure understandable and avoid speculative layers:
+1. trim the fields;
+2. uppercase the patient ID for display and submission;
+3. call `POST /api/auth/login`;
+4. pass the returned patient summary to the application authentication state;
+5. redirect to `/portal`; and
+6. show a generic help message for any rejected credentials.
+
+Do not add a registration page, password field, verification page, resend
+control, or browser-side session token storage.
+
+### 5.2 Protected routes
 
 ```text
-src/
-  App.jsx
-  components/
-    PortalLayout.jsx
-  pages/
-    LoginPage.jsx
-    VerifyPage.jsx
-    DashboardPage.jsx
-    AppointmentsPage.jsx
-    RecordsPage.jsx
-    TreatmentPlanPage.jsx
-    ProfilePage.jsx
-  api.js
-  index.css
-  main.jsx
-
-server/
-  app.js
-  index.js
-  config.js
-  db.js
-  auth.js
-  migrate.js
-  sms.js
-  routes/
-    auth.js
-    patient.js
-    health.js
-
-migrations/
-  001_patient_portal.sql
-
-test/
-  auth.test.js
-  authorization.test.js
-
-scripts/
-  seed-demo.js
+/portal
+/portal/appointments
+/portal/records
+/portal/treatment-plan
+/portal/profile
 ```
 
-Do not introduce repositories, service classes, factories, or interfaces unless
-there are at least two real implementations.
+The sidebar remains the primary navigation so more portal sections can be added
+without redesigning the layout.
 
-## 7. Patient Login Flow
+On application load, call `GET /api/me`:
 
-### 7.1 Clinic provisioning
+- `200`: restore the authenticated patient state;
+- `401`: show `/login`; and
+- network or `5xx`: show the retryable unavailable state.
 
-Before a patient can log in, clinic staff must:
+Any protected API `401` clears the frontend patient state and returns the user
+to `/login`.
 
-1. Verify the patient's identity in person.
-2. Create or import the patient record.
-3. Verify the patient's mobile number.
-4. Assign a random patient number such as `PT-7K4N9Q`.
-5. Enable portal access.
+## 6. API contract
 
-Do not use sequential database IDs as patient numbers.
-
-### 7.2 Start login
-
-The patient submits:
-
-```json
-{
-  "fullName": "Patricia Portal Demo",
-  "patientNumber": "PT-7K4N9Q"
-}
-```
-
-Normalize names using Unicode NFKC, lowercase, trimming, and collapsed internal
-whitespace. Preserve the display name separately. Normalize patient numbers to
-uppercase and trim whitespace.
-
-Whether the record matches or not, return the same status, response shape, and
-message:
+### 6.1 Login
 
 ```http
-202 Accepted
+POST /api/auth/login
+Content-Type: application/json
+Origin: https://dental.exodiagamedev.com
 ```
 
 ```json
 {
-  "challengeId": "random-public-challenge-id",
-  "message": "If the details match our records, a verification code was sent."
+  "fullName": "Nivelle Delos Santos Mendiola",
+  "patientNumber": "PT-RANDOM-PATIENT-ID"
 }
 ```
 
-Do not reveal:
+Validation:
 
-- Whether the patient exists
-- Which field was incorrect
-- A phone number or phone-number suffix before authentication
-- Whether the portal is enabled
+- reject extra properties;
+- `fullName`: string, 1 to 160 characters;
+- `patientNumber`: string, 4 to 40 characters;
+- normalize Unicode, trim, and collapse name whitespace;
+- normalize the patient ID to uppercase; and
+- permit only uppercase letters, digits, and hyphens in the normalized ID.
 
-For unknown users, create or emulate a dummy challenge so the response timing
-and shape remain comparable. Do not send an SMS for a dummy challenge.
-
-### 7.3 OTP rules
-
-- Generate with a cryptographically secure random source.
-- Use six decimal digits.
-- Expire after five minutes.
-- Allow no more than five verification attempts.
-- Make the code single-use.
-- A resend must invalidate the previous code.
-- A resend must not bypass account or IP rate limits.
-- Limit starts and resends per IP, patient lookup, and time window.
-- Store only an HMAC or secure digest of the code, never the plaintext code.
-- Never log the code.
-- The SMS contains only the code and expiry. It must not include treatment,
-  appointment, or diagnostic information.
-- Production must fail closed if a real SMS provider is not configured.
-- A fake delivery provider may exist only in test/development and must refuse to
-  start when `NODE_ENV=production`.
-
-The SMS provider is a required external decision. Isolate it in one small
-`sendOtp(phone, code)` module and implement only the selected provider.
-
-### 7.4 Verify login
-
-The patient submits:
+Success:
 
 ```json
 {
-  "challengeId": "challenge-id",
-  "code": "123456"
+  "patient": {
+    "displayName": "Nivelle Delos Santos Mendiola",
+    "patientNumber": "PT-RANDOM-PATIENT-ID"
+  }
 }
 ```
 
-On success:
+Invalid credentials:
 
-1. Atomically mark the challenge used.
-2. Create at least 32 random bytes for an opaque session token.
-3. Store only a SHA-256 digest of the session token.
-4. Send the original token in this cookie:
-
-```text
-__Host-portal_session=<token>; Secure; HttpOnly; SameSite=Lax; Path=/
+```json
+{
+  "error": {
+    "code": "INVALID_CREDENTIALS",
+    "message": "The name or patient ID is not recognized."
+  }
+}
 ```
 
-5. Apply a 30-minute inactivity timeout.
-6. Apply an eight-hour absolute timeout.
-7. Record a successful-login audit event.
+The same `401` response is used for unknown, mismatched, and disabled patients.
+A rate-limited client receives a generic `429` response that does not reveal
+whether an account exists.
 
-On failure, return one generic error. Increment attempts atomically. Never
-distinguish incorrect, expired, used, disabled, or dummy challenges to the
-patient.
-
-### 7.5 Logout and recovery
-
-- Logout revokes the current server-side session and clears the cookie.
-- Lost-phone recovery is clinic-assisted after identity verification.
-- Do not use date of birth, address, or security questions as the only recovery
-  proof.
-- Do not build public contact-number changes in the MVP.
-
-## 8. Database Specification
-
-Use Supabase-hosted PostgreSQL with UUID primary keys generated with
-`gen_random_uuid()`. Store all appointment timestamps as `timestamptz` in UTC
-and convert to Asia/Manila in the UI.
-
-Portal tables must not be readable through the Supabase Data API. Revoke table
-and sequence privileges from `anon`, `authenticated`, and `service_role`,
-enable row-level security with no browser-facing policies, and use only the
-least-privilege `dental_portal_app` role at runtime. These database controls are
-defense in depth; patient authorization still belongs in Fastify.
-
-### 8.1 `patients`
-
-- `id uuid primary key`
-- `patient_number text unique not null`
-- `display_name text not null`
-- `normalized_name text not null`
-- `phone_e164 text not null`
-- `phone_verified_at timestamptz not null`
-- `portal_enabled boolean not null default false`
-- `created_at timestamptz not null default now()`
-- `updated_at timestamptz not null default now()`
-
-### 8.2 `dentists`
-
-- `id uuid primary key`
-- `display_name text not null`
-- `specialty text`
-- `active boolean not null default true`
-
-### 8.3 `appointment_types`
-
-- `id uuid primary key`
-- `name text unique not null`
-- `default_duration_minutes integer not null`
-- `patient_description text`
-
-Seed examples: Cleaning, Brace Adjustment, Routine Checkup, Consultation,
-Extraction, Filling.
-
-### 8.4 `appointments`
-
-- `id uuid primary key`
-- `patient_id uuid not null references patients(id)`
-- `dentist_id uuid not null references dentists(id)`
-- `appointment_type_id uuid not null references appointment_types(id)`
-- `starts_at timestamptz not null`
-- `ends_at timestamptz not null`
-- `status text not null`
-- `patient_instructions text`
-- `created_at timestamptz not null default now()`
-- `updated_at timestamptz not null default now()`
-
-Allowed statuses: `scheduled`, `confirmed`, `completed`, `cancelled`,
-`no_show`.
-
-### 8.5 `treatment_plans`
-
-- `id uuid primary key`
-- `patient_id uuid not null references patients(id)`
-- `title text not null`
-- `patient_summary text not null`
-- `status text not null`
-- `started_on date`
-- `recommended_interval_days integer`
-- `next_recommended_on date`
-- `published_at timestamptz`
-- `created_at timestamptz not null default now()`
-- `updated_at timestamptz not null default now()`
-
-Only rows with `published_at is not null` are visible to patients.
-
-### 8.6 `clinical_records`
-
-- `id uuid primary key`
-- `patient_id uuid not null references patients(id)`
-- `dentist_id uuid not null references dentists(id)`
-- `appointment_id uuid references appointments(id)`
-- `procedure_name text not null`
-- `treated_on date not null`
-- `patient_summary text not null`
-- `published_at timestamptz`
-- `created_at timestamptz not null default now()`
-- `updated_at timestamptz not null default now()`
-
-Do not add internal dentist notes to this portal table in the MVP.
-
-### 8.7 `login_challenges`
-
-- `id uuid primary key`
-- `patient_id uuid references patients(id)`
-- `code_digest text`
-- `expires_at timestamptz not null`
-- `attempt_count integer not null default 0`
-- `max_attempts integer not null default 5`
-- `used_at timestamptz`
-- `created_at timestamptz not null default now()`
-
-`patient_id` and `code_digest` may be null for dummy challenges.
-
-### 8.8 `portal_sessions`
-
-- `id uuid primary key`
-- `patient_id uuid not null references patients(id)`
-- `token_digest text unique not null`
-- `created_at timestamptz not null default now()`
-- `last_seen_at timestamptz not null default now()`
-- `absolute_expires_at timestamptz not null`
-- `revoked_at timestamptz`
-
-### 8.9 `audit_events`
-
-- `id uuid primary key`
-- `actor_type text not null`
-- `actor_id uuid`
-- `action text not null`
-- `object_type text`
-- `object_id uuid`
-- `occurred_at timestamptz not null default now()`
-- `request_id text`
-- `ip_digest text`
-- `user_agent text`
-
-Do not store names, phone numbers, OTPs, clinical summaries, or full request
-bodies in audit events.
-
-Add indexes for patient lookups, upcoming appointments, published records,
-challenge expiry, active session lookup, and audit time.
-
-## 9. API Contract
-
-All API responses use JSON except `204 No Content`.
-
-### 9.1 Public authentication endpoints
+### 6.2 Session and patient endpoints
 
 ```text
-POST /api/auth/start
-POST /api/auth/verify
-POST /api/auth/resend
 POST /api/auth/logout
+GET  /api/me
+GET  /api/me/dashboard
+GET  /api/me/appointments?scope=upcoming|past
+GET  /api/me/appointments/:id
+GET  /api/me/records
+GET  /api/me/records/:id
+GET  /api/me/treatment-plan
 GET  /api/health
 ```
 
-### 9.2 Authenticated patient endpoints
+All state-changing API requests must have the exact configured `Origin`.
+Authentication and patient responses must include `Cache-Control: no-store`.
+Unknown API routes return a JSON `404`; valid React deep links return
+`dist/index.html`.
+
+## 7. Login and session behavior
+
+### 7.1 Rate limiting
+
+Apply the rate limiter directly to `POST /api/auth/login`.
+
+Configuration:
 
 ```text
-GET /api/me
-GET /api/me/dashboard
-GET /api/me/appointments?scope=upcoming|past
-GET /api/me/appointments/:appointmentId
-GET /api/me/records
-GET /api/me/records/:recordId
-GET /api/me/treatment-plan
+LOGIN_MAX_ATTEMPTS=5
+LOGIN_WINDOW_MINUTES=15
 ```
 
-Do not create endpoints shaped like:
+Key attempts by the trusted client IP after the configured reverse-proxy hop.
+The limit must run before patient lookup and must apply equally to successful
+and failed submissions. Do not use a patient name or ID as a response-visible
+rate-limit key.
 
-```text
-GET /api/patients/:patientId/records
-GET /api/patients/:patientId/appointments
-```
+The in-process limiter assumes one Fastify replica. Before horizontal scaling,
+move the limit to a shared store or an approved edge control. Verify in
+production that `request.ip` resolves to the patient-facing client address and
+cannot be chosen through a spoofed forwarding header.
 
-Every patient query must include the authenticated session patient:
+### 7.2 Account match
 
-```sql
-... where id = $requested_object_id and patient_id = $session_patient_id
-```
+Match both:
 
-Appointment and record detail endpoints must return `404` for both nonexistent
-and unauthorized objects.
+- normalized full name; and
+- normalized patient ID.
 
-### 9.3 Response rules
+Require `portal_enabled = true`. Do not require a phone number or phone
+verification state.
 
-- Validate every request body, parameter, and query string.
-- Return stable error codes suitable for the UI.
-- Do not return database errors or stack traces.
-- Set `Cache-Control: no-store` on authenticated and authentication responses.
-- Verify the request `Origin` on state-changing requests.
-- Use security headers through Helmet.
-- Configure the application to trust only the Coolify proxy.
-- Redact cookies, authorization values, names, patient numbers, phone numbers,
-  OTP fields, and request bodies from logs.
+Perform account lookup and session creation through the server-side store. No
+patient lookup result is sent to the browser unless session creation succeeds.
 
-## 10. Frontend Requirements
+### 7.3 Opaque session
 
-### 10.1 General
+For each successful login:
 
-- Preserve the existing colors, typography, cards, and responsive sidebar.
-- Replace hard-coded identity and appointment values with API responses.
-- Use semantic HTML, visible focus states, labels, and keyboard navigation.
-- Support widths from 320px upward.
-- Never place clinical data or patient IDs in URL query strings.
-- Use native `fetch` through one small `src/api.js` wrapper with
-  `credentials: "same-origin"`.
-- Do not cache patient API responses beyond component memory.
-- Clear patient state immediately on logout or `401`.
+1. generate 32 random bytes using Node's cryptographic random source;
+2. encode the bytes with base64url for the browser token;
+3. store only `SHA-256(token)` in `portal_sessions`;
+4. set the cookie named `__Host-portal_session`;
+5. set `Secure`, `HttpOnly`, `SameSite=Lax`, and `Path=/`;
+6. omit `Domain` so the cookie stays host-only; and
+7. create a `portal.login_succeeded` audit event in the same database
+   transaction as the session.
 
-### 10.2 Login page
+Never place the token in JSON, a URL, `localStorage`, or `sessionStorage`.
 
-- Full-name field labeled “Full name as recorded by the clinic”
-- Patient-ID field labeled “Patient ID”
-- Example formatting only; do not display a real person's full name
-- Clear explanation: “No password is required. We will verify the mobile number
-  registered with the clinic.”
-- Generic success and error messages
-- Link to call the clinic when the patient ID or mobile number is unavailable
+### 7.4 Session checks
 
-### 10.3 Verification page
+Every protected request must verify:
 
-- Six individual visual positions or one accessible numeric input
-- Paste support
-- Five-minute expiry indicator
-- Resend button with cooldown
-- Never reveal the registered phone number before successful authentication
-- Return to login option
+- the token digest exists;
+- the session is not revoked;
+- absolute expiry is in the future;
+- last activity is within `SESSION_IDLE_MINUTES`; and
+- the patient still has portal access enabled.
 
-### 10.4 Dashboard
+Update `last_seen_at` after a valid check. Logout marks the session revoked and
+clears the cookie. Invalid or expired sessions also clear the cookie.
 
-- Patient greeting from `/api/me`
-- Next confirmed or scheduled appointment
-- Current published treatment plan
-- Next recommended care date
-- Recent published treatment
-- Clinic contact
+## 8. Authorization and audit
 
-### 10.5 Appointments
+All appointment, record, and treatment-plan queries include the authenticated
+`patient_id`.
 
-- Separate upcoming and past sections
-- Display Asia/Manila date and time
-- Show appointment type, dentist, status, and patient instructions
-- “Request reschedule” opens the clinic phone/contact action only
-- Do not mutate appointment data
+Never accept `patientId` in a request body, path, or query string as an
+authorization selector. A valid UUID belonging to another patient must return
+the same `404` as an unknown UUID.
 
-### 10.6 Records
+Clinical records and treatment plans require `published_at IS NOT NULL`.
+Treatment-plan responses return only the active published plan.
 
-- Show only published patient summaries
-- Display procedure, treatment date, and dentist
-- No raw diagnosis codes, internal notes, or attachments in the MVP
-- Clear empty state
+Audit events may contain:
 
-### 10.7 Treatment plan
+- actor type and authenticated patient UUID;
+- action name;
+- object type and UUID;
+- timestamp;
+- request ID;
+- a keyed digest of the IP address; and
+- a truncated user-agent value.
 
-- Show only the active published plan
-- Display patient-safe summary, start date, expected interval, and next
-  recommended date
-- Clearly distinguish a recommendation from a booked appointment
+Audit events must not contain a full name, patient ID, session token, cookie,
+appointment instructions, or clinical summary.
 
-## 11. Demo Data and Import Rules
+## 9. Database requirements
 
-- Use obviously fictional demo patients in development and tests.
-- Never commit a CSV, database dump, screenshot, or log containing real patient
-  information.
-- Provide a repeatable demo seed script.
-- The seed script must refuse to run in production unless an explicit,
-  separately named override is provided.
-- Before production integration, determine whether the source of truth is
-  paper, Excel, Google Sheets, or another clinic system.
-- Do not build a general staff administration portal in this MVP.
-- For a pilot, use a controlled import process or direct clinic-operated data
-  entry outside the public portal.
+Portal tables live in the private `dental_portal` schema:
 
-Production rollout is blocked until the clinic defines how appointments and
-published records are maintained.
+- `patients`
+- `dentists`
+- `appointment_types`
+- `appointments`
+- `treatment_plans`
+- `clinical_records`
+- `portal_sessions`
+- `audit_events`
 
-## 12. Environment Variables
+Applied migrations are immutable. Add a new ordered migration for schema
+changes; never edit a migration already recorded in
+`dental_portal.schema_migrations`.
 
-Document runtime variables in `.env.example` without real values:
+The non-login `dental_portal_backend` role receives only the operations used by
+the server. The production login `dental_portal_app` inherits that role and
+uses the search path `dental_portal, public`.
 
-```text
-NODE_ENV=development
+The `anon`, `authenticated`, and `service_role` API roles receive no schema or
+table access to the portal. RLS stays enabled and forced as defense in depth,
+but application-level patient scoping remains mandatory.
+
+## 10. Environment contract
+
+Runtime variables:
+
+```dotenv
+NODE_ENV=production
 PORT=3000
 PUBLIC_ORIGIN=https://dental.exodiagamedev.com
 DATABASE_URL=postgresql://dental_portal_app.<project-ref>:<url-encoded-password>@<session-pooler-host>:5432/postgres
-SESSION_PEPPER=replace-with-at-least-32-random-bytes
-OTP_PEPPER=replace-with-at-least-32-random-bytes
-SMS_PROVIDER=development
-SMS_API_URL=
-SMS_API_TOKEN=
-SMS_SENDER=
+SESSION_PEPPER=<at-least-32-random-bytes>
 SESSION_IDLE_MINUTES=30
 SESSION_ABSOLUTE_HOURS=8
-OTP_EXPIRY_MINUTES=5
-OTP_MAX_ATTEMPTS=5
+LOGIN_MAX_ATTEMPTS=5
+LOGIN_WINDOW_MINUTES=15
 ```
 
-In production, `DATABASE_URL` must be the least-privilege
-`dental_portal_app` Supavisor **session mode** URL on port `5432`, copied from
-the Supabase dashboard. The application automatically verifies the Supabase
-TLS certificate and hostname with the bundled public CA. Never disable
-certificate verification.
+Optional public build variables:
 
-The following are one-time migration inputs, not application runtime variables:
+```dotenv
+VITE_CLINIC_PHONE_TEL=
+VITE_CLINIC_PHONE_DISPLAY=
+```
 
-```text
+One-time migration-shell variables:
+
+```dotenv
 SUPABASE_PROJECT_REF=<project-ref>
-SUPABASE_ACCESS_TOKEN=<temporary-access-token>
+SUPABASE_ACCESS_TOKEN=<temporary-management-token>
 ```
 
-Pass them only to `npm run migrate:supabase` from a trusted administrator
-machine, then unset them. Never add either value to Coolify, a deployed `.env`,
-Git, logs, or Vite variables. The project URL, publishable key, and service-role
-key are not needed by this application and must not be added to the browser.
+The migration variables must never be stored in Coolify or a browser bundle.
+No Supabase project URL, publishable key, service-role key, or management token
+is required by the runtime or frontend.
 
-Validate required variables at startup. Production must refuse to start with
-development placeholders, a development SMS provider, an HTTP public origin,
-missing peppers, a non-Supabase production database host, transaction-mode port
-`6543`, or a database connection that cannot pass certificate and hostname
-verification.
+Production configuration must reject:
 
-## 13. Supabase and Coolify Deployment Requirements
+- a non-Supabase database host;
+- transaction-pooler port `6543`;
+- an owner or `postgres` database role;
+- a non-HTTPS public origin;
+- missing or placeholder session pepper values; and
+- invalid session or rate-limit durations.
 
-1. Build the React application during the Docker build.
-2. Use a Node 22 runtime image.
-3. Serve the built React files and API from the same Fastify application.
-4. Listen on `0.0.0.0:3000`.
-5. Expose port `3000`.
-6. Add `GET /api/health` and a Docker health check.
-7. Use Supabase-hosted PostgreSQL; do not create a PostgreSQL resource in
-   Coolify.
-8. Use a least-privilege `dental_portal_app` Supavisor session-mode URL on port
-   `5432` as Coolify's `DATABASE_URL`.
-9. Verify the Supabase TLS certificate and hostname with the bundled public CA.
-   Never use `rejectUnauthorized: false`.
-10. Run `npm run migrate:supabase` from a trusted administrator machine before
-    deployment. Application startup must not run migrations.
-11. Provision `dental_portal_app` as a login role with a unique generated
-    password, grant it membership in the migration-created
-    `dental_portal_backend` role, set `search_path=dental_portal,public`,
-    configure 15-second statement and idle-transaction timeouts, and limit it
-    to 20 connections. Never run the application as `postgres`.
-12. Use `SUPABASE_PROJECT_REF` and `SUPABASE_ACCESS_TOKEN` only for that
-    one-time migration command. Never store them in Coolify or runtime
-    configuration; revoke or rotate the access token after use.
-13. Revoke Supabase API-role privileges and enable forced row-level security
-    with no browser-facing policies on all patient, OTP, session, clinical, and
-    audit tables. Keep migration history private with no runtime-role access.
-14. Do not install a Supabase browser SDK or configure a Supabase key in Vite.
-    Browser requests must remain same-origin requests to Fastify.
-15. Configure all runtime secrets in Coolify, not Git.
-16. Enable encrypted Supabase backup coverage and any required independent
-    off-server backup.
-17. Test a database restore before production launch.
-18. Keep Cloudflare proxying only after direct Coolify routing works.
-19. Do not log environment variables or connection strings during deployment.
+## 11. Supabase migration
 
-The Node runtime replaces the current production Nginx runtime. Remove obsolete
-Nginx configuration only after the Node server correctly handles SPA fallback
-for `/portal/*`.
+Use the management API migration command only from a trusted machine:
 
-## 14. Implementation Phases
+```bash
+SUPABASE_PROJECT_REF=<project-ref> \
+SUPABASE_ACCESS_TOKEN=<temporary-access-token> \
+npm run migrate:supabase
+```
 
-### Phase 0: Baseline
+Requirements:
 
-- Run the existing build.
-- Record existing responsive behavior.
-- Add this plan to the implementation checklist.
-- Add `.env.example`.
+- apply migrations in filename order;
+- store and verify a SHA-256 checksum for each migration;
+- refuse changed migrations;
+- refuse unsafe public-table name collisions;
+- keep management tokens out of SQL and logs; and
+- make a second run a no-op.
 
-Exit criteria:
+Use the Supavisor session-mode endpoint on port `5432` for Coolify. The runtime
+must verify the Supabase CA and hostname. Never set
+`rejectUnauthorized: false`.
 
-- Existing build passes.
-- No unrelated files changed.
+## 12. Coolify deployment
 
-### Phase 1: Routing and static portal screens
+1. Build the repository `Dockerfile`.
+2. Expose container port `3000`; do not add a host port mapping.
+3. Set the production domain and exact `PUBLIC_ORIGIN` to
+   `https://dental.exodiagamedev.com`.
+4. Add only the runtime and optional public build variables from section 10.
+5. Set the health check to `/api/health`.
+6. Run migrations before deploying the application version.
+7. Verify the direct Coolify route before enabling Cloudflare proxying.
+8. After enabling Cloudflare, verify `/`, `/login`, a `/portal/*` deep link,
+   `/favicon.svg`, and `/api/health`.
+9. Confirm no secret appears in image layers, build logs, runtime logs, or
+   browser assets.
 
-- Add React Router.
-- Split the current dashboard into the portal layout and pages.
-- Add login and verification screens.
-- Use fictional in-memory data only during this phase.
-
-Exit criteria:
-
-- All routes render.
-- Protected routes redirect correctly using a temporary auth fixture.
-- Desktop and mobile sidebar behavior remains correct.
-- Production frontend build passes.
-
-### Phase 2: Database and API foundation
-
-- Add Fastify.
-- Add configuration validation.
-- Add a verified-TLS `pg` connection to Supabase-hosted PostgreSQL.
-- Add the one-time `npm run migrate:supabase` migration runner.
-- Add the initial migration.
-- Revoke Supabase API-role access and enable row-level security with no
-  browser-facing policies.
-- Add health endpoint.
-- Serve `dist` with SPA fallback.
-- Add fictional demo seed script.
-
-Exit criteria:
-
-- Migration works on an empty Supabase database and is idempotent.
-- Runtime uses the least-privilege `dental_portal_app` role through Supavisor
-  session mode on port `5432`.
-- Supabase API roles cannot read portal tables.
-- Health endpoint reports application and database readiness.
-- React deep links load directly.
-- API tests run without a browser.
-
-### Phase 3: Authentication
-
-- Implement login start, OTP delivery boundary, verify, resend, session
-  middleware, and logout.
-- Add generic responses, atomic attempt limits, expiry, rate limits, cookie
-  flags, log redaction, and audit events.
-- Implement development/test OTP delivery with a production refusal guard.
-
-Exit criteria:
-
-- Known and unknown login starts have the same status and response shape.
-- OTP expires, is single-use, and locks after the configured attempts.
-- Resend invalidates the previous OTP.
-- Session cookie has Secure, HttpOnly, SameSite, and Path attributes.
-- Logout revokes the session.
-- Production refuses the development SMS provider.
-
-Stop before real SMS integration if the provider has not been selected.
-
-### Phase 4: Patient data authorization
-
-- Implement `/api/me` and all patient endpoints.
-- Scope every query to the session patient.
-- Return only published records and treatment plans.
-- Write audit events without clinical content.
-
-Exit criteria:
-
-- Patient A cannot list or retrieve Patient B's data.
-- Changing an appointment or record identifier does not bypass authorization.
-- Unpublished records never appear.
-- No endpoint accepts a patient ID to select the active patient.
-
-### Phase 5: Connect the frontend
-
-- Replace fixture data with the real API.
-- Implement loading, empty, error, offline, expired-session, and logout states.
-- Format dates in Asia/Manila.
-- Remove all hard-coded prototype patient data.
-
-Exit criteria:
-
-- A fictional test patient completes the full login flow.
-- Dashboard, appointments, records, and treatment plan use database data.
-- Logout clears UI state and revokes the session.
-- Mobile and desktop layouts pass visual checks.
-
-### Phase 6: Security and deployment
-
-- Add production Docker runtime.
-- Configure Coolify with only runtime variables and the least-privilege
-  Supavisor session-mode `DATABASE_URL`.
-- Run Supabase migrations separately with short-lived administrator tooling.
-- Configure the approved SMS provider.
-- Add security headers, no-store behavior, health check, backup, and restore
-  documentation.
-- Test a clean deploy and rollback.
-
-Exit criteria:
-
-- Production build and container start successfully.
-- Direct Coolify domain routing works on port `3000`.
-- Health check passes.
-- Runtime database traffic uses session mode on port `5432` with verified TLS.
-- The publishable key and Supabase Data API roles cannot access portal data.
-- Migration credentials are absent from Coolify and the running container.
-- No secrets or patient data appear in logs.
-- Backup restoration has been demonstrated.
-
-### Phase 7: Pilot
-
-- Use clinic-approved fictional data first.
-- Conduct a privacy and security review.
-- Pilot with 5–10 consenting adult patients.
-- Monitor login failures, delivery failures, unauthorized attempts, and support
-  issues without logging clinical content.
-
-Exit criteria:
-
-- Clinic approves data accuracy.
-- No cross-patient access issue exists.
-- Recovery and incident procedures are documented.
-- The clinic's DPO approves production processing.
-
-## 15. Required Automated Tests
-
-Use `node:test` and Fastify `inject`.
+## 13. Required tests
 
 ### Authentication
 
-- Name and patient-number normalization
-- Known and unknown login start response equivalence
-- Invalid request validation
-- OTP digest is stored instead of plaintext
-- Correct OTP succeeds
-- Incorrect OTP increments attempts
-- Sixth attempt cannot succeed when maximum is five
-- Expired OTP fails
-- Used OTP cannot be replayed
-- Resend invalidates the prior code
-- Session token digest is stored instead of plaintext
-- Idle timeout
-- Absolute timeout
-- Logout revocation
-- Required cookie attributes
+- Unicode, whitespace, and case normalization work as specified.
+- Missing and extra login fields return `400`.
+- Exact valid details create one session and return the patient summary.
+- Unknown, mismatched, and disabled accounts return identical `401` bodies.
+- Rate limits apply to repeated valid and invalid attempts.
+- The production proxy supplies a trustworthy client IP for rate limiting.
+- The raw session token is not stored.
+- Cookie flags include `Secure`, `HttpOnly`, `SameSite=Lax`, and `Path=/`.
+- Logout revokes the session and clears the cookie.
+- Idle and absolute expiry reject the session.
+- A disabled patient cannot reuse an existing session.
+- Login success creates the expected audit event.
 
-### Authorization
+### Authorization and privacy
 
-- Unauthenticated requests return `401`
-- Patient A receives only Patient A appointments
-- Patient A cannot retrieve Patient B appointment by ID
-- Patient A receives only Patient A records
-- Patient A cannot retrieve Patient B record by ID
-- Unpublished records and treatment plans remain hidden
-- Disabled portal access cannot create a session
-
-### API and deployment
-
-- Health succeeds with database access
-- Health fails readiness when the database is unavailable
-- Supabase connections reject an invalid or untrusted TLS certificate
-- Production rejects transaction-mode port `6543` and non-Supabase hosts
-- Supabase `anon`, `authenticated`, and `service_role` roles cannot read portal
-  tables
-- Protected responses include `Cache-Control: no-store`
-- State-changing requests reject an invalid Origin
-- SPA deep-link fallback returns the React application
-- Production configuration rejects development secrets and SMS mode
-
-## 16. Manual Verification Checklist
-
-- Login works on a 320px-wide viewport.
-- OTP input works with keyboard, paste, and screen readers.
-- Sidebar opens and closes on mobile.
-- Focus remains visible.
-- Dates display correctly in Asia/Manila.
-- Browser refresh works on every `/portal/*` route.
-- Browser back/forward navigation works.
-- Session expiry returns the patient to login without stale data.
-- No patient data remains visible after logout.
-- API responses contain no internal notes or unnecessary fields.
-- Browser storage contains no tokens or patient records.
-- Browser console has no errors.
-- Application logs contain no name, patient number, phone, OTP, cookie, or
+- Unauthenticated patient endpoints return `401`.
+- Another patient's appointment and record UUIDs return `404`.
+- Unpublished records and plans are never returned.
+- Browser-supplied patient selectors are rejected.
+- Authentication and patient endpoints include `Cache-Control: no-store`.
+- State-changing requests without the configured origin return `403`.
+- Logs contain no request body, cookie, token, full name, patient ID, or
   clinical content.
 
-## 17. Definition of Done
+### Supabase and deployment
 
-The MVP is complete only when:
+- Migrations are ordered, checksummed, idempotent, and immutable.
+- Portal tables are inaccessible to Supabase API roles.
+- The runtime role has only required grants.
+- RLS is enabled and forced on portal tables.
+- TLS certificate and hostname verification succeed.
+- Production rejects owner roles and port `6543`.
+- `npm run verify` passes.
+- `/api/health` fails closed when PostgreSQL is unavailable.
+- React deep links load while unknown `/api/*` paths remain JSON `404`.
 
-1. A clinic-provisioned fictional patient can complete full-name, patient-ID,
-   and OTP login.
-2. The patient sees database-backed appointments, published records, and a
-   published treatment plan.
-3. No patient can access another patient's data by changing a URL, parameter,
-   or request body.
-4. OTP and session security tests pass.
-5. All protected data uses no-store responses and secure server-side sessions.
-6. The frontend passes production build and responsive visual checks.
-7. Coolify deploys the Node application on port `3000` with a least-privilege,
-   verified-TLS Supavisor session-mode connection to Supabase on port `5432`.
-8. Production refuses insecure or incomplete configuration.
-9. Secrets and patient data do not appear in Git, browser storage, or logs.
-10. Backup restoration, logout, expiration, and rollback are verified.
-11. The clinic has approved the privacy notice, data workflow, recovery
-    procedure, and patient-visible content.
-12. The clinic's DPO has completed the required privacy assessment before real
-    patient data is enabled.
+## 14. Implementation order for an AI agent
 
-## 18. Release Gates Requiring Product-Owner Input
+1. Inspect the existing working tree and preserve unrelated user changes.
+2. Remove the obsolete verification route, page, API calls, configuration, and
+   delivery module.
+3. Implement the single direct-login endpoint and store transaction.
+4. Preserve opaque-session, origin, audit, and patient-scoping code.
+5. Add an ordered migration only if the stored schema must change.
+6. Update frontend login behavior and remove verification navigation.
+7. Update tests before changing deployment configuration.
+8. Run `npm run verify`.
+9. Apply Supabase migrations and verify them with a second no-op run.
+10. Confirm Coolify uses only the runtime variables in section 10.
+11. Deploy and test the production domain.
+12. Commit and push the verified result to `main`.
 
-The implementing AI may build with fictional data before these are answered,
-but must not enable real patient data until the decisions are recorded:
+## 15. Definition of done
 
-1. What is the clinic's current source of patient records and schedules?
-2. Does every pilot patient have a clinic-verified mobile number?
-3. Which SMS provider will be used, and in which country will it process data?
-4. Will the pilot contain minors or dependent patients?
-5. Which exact clinical fields may be published to patients?
-6. Who at the clinic publishes and corrects patient-visible summaries?
-7. What is the lost-phone identity-verification procedure?
-8. What are the clinic's retention and deletion rules?
-9. Which Supabase backup tier and independent encrypted off-server restore
-   location will be used?
-10. Who is the clinic's Data Protection Officer?
+The work is complete only when:
 
-## 19. Security and Privacy References
-
-- Philippine Data Privacy Act:
-  https://privacy.gov.ph/data-privacy-act/
-- NPC Circular 2023-06:
-  https://privacy.gov.ph/wp-content/uploads/2024/03/NPC-Circular-Repeal-16-01-Signed.pdf
-- NIST SP 800-63B:
-  https://pages.nist.gov/800-63-4/sp800-63b.html
-- OWASP Authentication Cheat Sheet:
-  https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html
-- OWASP Authorization Cheat Sheet:
-  https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html
-- OWASP Session Management Cheat Sheet:
-  https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html
-- OWASP IDOR Prevention Cheat Sheet:
-  https://cheatsheetseries.owasp.org/cheatsheets/Insecure_Direct_Object_Reference_Prevention_Cheat_Sheet.html
-
-This specification is a technical implementation plan. It does not replace
-review by the clinic's Data Protection Officer or Philippine legal counsel.
+- a valid full name and patient ID open the portal directly;
+- no registration, password, SMS, or one-time-code screen or dependency
+  remains;
+- invalid credentials cannot create a session or reveal account existence;
+- strict rate limiting, opaque sessions, expiry, logout, audit, patient
+  scoping, and published-record filtering pass automated tests;
+- Supabase remains private and least privilege over verified TLS;
+- Coolify starts successfully without delivery-provider variables;
+- production health and deep-link checks pass; and
+- the verified commit is pushed to `main`.
