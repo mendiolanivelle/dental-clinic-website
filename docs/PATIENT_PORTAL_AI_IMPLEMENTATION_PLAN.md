@@ -50,8 +50,8 @@ These decisions are fixed unless the product owner explicitly changes them:
 6. The portal is served from the existing origin:
    `https://dental.exodiagamedev.com`.
 7. The React application and API are served by one Node process on port `3000`.
-8. PostgreSQL is the database and is accessible only on Coolify's private
-   network.
+8. Production uses Supabase-hosted PostgreSQL through a least-privilege
+   Supavisor session-mode connection on port `5432`.
 9. Authentication uses an opaque server-side session and an HttpOnly cookie.
 10. Authentication tokens, OTPs, and clinical data must never be stored in
     `localStorage` or `sessionStorage`.
@@ -136,13 +136,20 @@ Cloudflare
         -> serves built React files
         -> exposes same-origin /api routes
         -> sends OTP through an approved SMS provider
-        -> connects to private PostgreSQL
+        -> connects over verified TLS to Supabase-hosted PostgreSQL
         -> records security audit events
 ```
 
-Use a single application container and a separate private PostgreSQL resource.
+Use a single persistent application container and Supabase-hosted PostgreSQL.
+The Coolify runtime connects through Supavisor session mode on port `5432`;
+transaction mode on port `6543` is not appropriate for this persistent server.
 Do not create a separate public API domain. Same-origin API calls avoid
 unnecessary CORS and cookie complexity.
+
+Fastify remains the only application API and authentication boundary. Do not
+add the Supabase browser SDK, expose a publishable or service-role key to React,
+or query the Supabase Data API from the browser. Supabase Auth sessions are not
+interchangeable with the portal's custom OTP and opaque server-side sessions.
 
 ### 6.1 Required dependencies
 
@@ -159,8 +166,10 @@ Use the smallest stable set:
 
 Use Node's built-in `crypto`, `fetch`, and `node:test` where possible. Do not
 add an ORM, Axios, Redux, React Query, a validation framework, or a logging
-platform for the MVP. Use Fastify JSON schemas for request validation and
-Fastify's `inject` for API tests.
+platform for the MVP. Do not add `@supabase/supabase-js`; the existing `pg`
+driver is the correct connection layer for Supabase-hosted PostgreSQL. Use
+Fastify JSON schemas for request validation and Fastify's `inject` for API
+tests.
 
 ### 6.2 Suggested file structure
 
@@ -324,9 +333,15 @@ patient.
 
 ## 8. Database Specification
 
-Use PostgreSQL UUID primary keys generated with `gen_random_uuid()`. Store all
-appointment timestamps as `timestamptz` in UTC and convert to Asia/Manila in the
-UI.
+Use Supabase-hosted PostgreSQL with UUID primary keys generated with
+`gen_random_uuid()`. Store all appointment timestamps as `timestamptz` in UTC
+and convert to Asia/Manila in the UI.
+
+Portal tables must not be readable through the Supabase Data API. Revoke table
+and sequence privileges from `anon`, `authenticated`, and `service_role`,
+enable row-level security with no browser-facing policies, and use only the
+least-privilege `dental_portal_app` role at runtime. These database controls are
+defense in depth; patient authorization still belongs in Fastify.
 
 ### 8.1 `patients`
 
@@ -583,13 +598,13 @@ published records are maintained.
 
 ## 12. Environment Variables
 
-Document these in `.env.example` without real values:
+Document runtime variables in `.env.example` without real values:
 
 ```text
 NODE_ENV=development
 PORT=3000
 PUBLIC_ORIGIN=https://dental.exodiagamedev.com
-DATABASE_URL=postgres://...
+DATABASE_URL=postgresql://dental_portal_app.<project-ref>:<url-encoded-password>@<session-pooler-host>:5432/postgres
 SESSION_PEPPER=replace-with-at-least-32-random-bytes
 OTP_PEPPER=replace-with-at-least-32-random-bytes
 SMS_PROVIDER=development
@@ -602,11 +617,31 @@ OTP_EXPIRY_MINUTES=5
 OTP_MAX_ATTEMPTS=5
 ```
 
+In production, `DATABASE_URL` must be the least-privilege
+`dental_portal_app` Supavisor **session mode** URL on port `5432`, copied from
+the Supabase dashboard. The application automatically verifies the Supabase
+TLS certificate and hostname with the bundled public CA. Never disable
+certificate verification.
+
+The following are one-time migration inputs, not application runtime variables:
+
+```text
+SUPABASE_PROJECT_REF=<project-ref>
+SUPABASE_ACCESS_TOKEN=<temporary-access-token>
+```
+
+Pass them only to `npm run migrate:supabase` from a trusted administrator
+machine, then unset them. Never add either value to Coolify, a deployed `.env`,
+Git, logs, or Vite variables. The project URL, publishable key, and service-role
+key are not needed by this application and must not be added to the browser.
+
 Validate required variables at startup. Production must refuse to start with
 development placeholders, a development SMS provider, an HTTP public origin,
-or missing peppers.
+missing peppers, a non-Supabase production database host, transaction-mode port
+`6543`, or a database connection that cannot pass certificate and hostname
+verification.
 
-## 13. Coolify Deployment Requirements
+## 13. Supabase and Coolify Deployment Requirements
 
 1. Build the React application during the Docker build.
 2. Use a Node 22 runtime image.
@@ -614,15 +649,33 @@ or missing peppers.
 4. Listen on `0.0.0.0:3000`.
 5. Expose port `3000`.
 6. Add `GET /api/health` and a Docker health check.
-7. Create PostgreSQL as a separate Coolify resource.
-8. Keep PostgreSQL private; do not add a public port mapping.
-9. Configure all secrets in Coolify, not Git.
-10. Run idempotent SQL migrations before the application starts accepting
-    traffic.
-11. Enable encrypted off-server database backups.
-12. Test a database restore before production launch.
-13. Keep Cloudflare proxying only after direct Coolify routing works.
-14. Do not log environment variables or connection strings during deployment.
+7. Use Supabase-hosted PostgreSQL; do not create a PostgreSQL resource in
+   Coolify.
+8. Use a least-privilege `dental_portal_app` Supavisor session-mode URL on port
+   `5432` as Coolify's `DATABASE_URL`.
+9. Verify the Supabase TLS certificate and hostname with the bundled public CA.
+   Never use `rejectUnauthorized: false`.
+10. Run `npm run migrate:supabase` from a trusted administrator machine before
+    deployment. Application startup must not run migrations.
+11. Provision `dental_portal_app` as a login role with a unique generated
+    password, grant it membership in the migration-created
+    `dental_portal_backend` role, set `search_path=dental_portal,public`,
+    configure 15-second statement and idle-transaction timeouts, and limit it
+    to 20 connections. Never run the application as `postgres`.
+12. Use `SUPABASE_PROJECT_REF` and `SUPABASE_ACCESS_TOKEN` only for that
+    one-time migration command. Never store them in Coolify or runtime
+    configuration; revoke or rotate the access token after use.
+13. Revoke Supabase API-role privileges and enable forced row-level security
+    with no browser-facing policies on all patient, OTP, session, clinical, and
+    audit tables. Keep migration history private with no runtime-role access.
+14. Do not install a Supabase browser SDK or configure a Supabase key in Vite.
+    Browser requests must remain same-origin requests to Fastify.
+15. Configure all runtime secrets in Coolify, not Git.
+16. Enable encrypted Supabase backup coverage and any required independent
+    off-server backup.
+17. Test a database restore before production launch.
+18. Keep Cloudflare proxying only after direct Coolify routing works.
+19. Do not log environment variables or connection strings during deployment.
 
 The Node runtime replaces the current production Nginx runtime. Remove obsolete
 Nginx configuration only after the Node server correctly handles SPA fallback
@@ -660,15 +713,21 @@ Exit criteria:
 
 - Add Fastify.
 - Add configuration validation.
-- Add PostgreSQL connection and migration runner.
+- Add a verified-TLS `pg` connection to Supabase-hosted PostgreSQL.
+- Add the one-time `npm run migrate:supabase` migration runner.
 - Add the initial migration.
+- Revoke Supabase API-role access and enable row-level security with no
+  browser-facing policies.
 - Add health endpoint.
 - Serve `dist` with SPA fallback.
 - Add fictional demo seed script.
 
 Exit criteria:
 
-- Migration works on an empty database and is idempotent.
+- Migration works on an empty Supabase database and is idempotent.
+- Runtime uses the least-privilege `dental_portal_app` role through Supavisor
+  session mode on port `5432`.
+- Supabase API roles cannot read portal tables.
 - Health endpoint reports application and database readiness.
 - React deep links load directly.
 - API tests run without a browser.
@@ -723,7 +782,9 @@ Exit criteria:
 ### Phase 6: Security and deployment
 
 - Add production Docker runtime.
-- Configure Coolify variables and private PostgreSQL.
+- Configure Coolify with only runtime variables and the least-privilege
+  Supavisor session-mode `DATABASE_URL`.
+- Run Supabase migrations separately with short-lived administrator tooling.
 - Configure the approved SMS provider.
 - Add security headers, no-store behavior, health check, backup, and restore
   documentation.
@@ -734,7 +795,9 @@ Exit criteria:
 - Production build and container start successfully.
 - Direct Coolify domain routing works on port `3000`.
 - Health check passes.
-- Database is not publicly reachable.
+- Runtime database traffic uses session mode on port `5432` with verified TLS.
+- The publishable key and Supabase Data API roles cannot access portal data.
+- Migration credentials are absent from Coolify and the running container.
 - No secrets or patient data appear in logs.
 - Backup restoration has been demonstrated.
 
@@ -789,6 +852,10 @@ Use `node:test` and Fastify `inject`.
 
 - Health succeeds with database access
 - Health fails readiness when the database is unavailable
+- Supabase connections reject an invalid or untrusted TLS certificate
+- Production rejects transaction-mode port `6543` and non-Supabase hosts
+- Supabase `anon`, `authenticated`, and `service_role` roles cannot read portal
+  tables
 - Protected responses include `Cache-Control: no-store`
 - State-changing requests reject an invalid Origin
 - SPA deep-link fallback returns the React application
@@ -824,7 +891,8 @@ The MVP is complete only when:
 4. OTP and session security tests pass.
 5. All protected data uses no-store responses and secure server-side sessions.
 6. The frontend passes production build and responsive visual checks.
-7. Coolify deploys the Node application on port `3000` with private PostgreSQL.
+7. Coolify deploys the Node application on port `3000` with a least-privilege,
+   verified-TLS Supavisor session-mode connection to Supabase on port `5432`.
 8. Production refuses insecure or incomplete configuration.
 9. Secrets and patient data do not appear in Git, browser storage, or logs.
 10. Backup restoration, logout, expiration, and rollback are verified.
@@ -846,7 +914,8 @@ but must not enable real patient data until the decisions are recorded:
 6. Who at the clinic publishes and corrects patient-visible summaries?
 7. What is the lost-phone identity-verification procedure?
 8. What are the clinic's retention and deletion rules?
-9. Where will encrypted off-server backups be stored?
+9. Which Supabase backup tier and independent encrypted off-server restore
+   location will be used?
 10. Who is the clinic's Data Protection Officer?
 
 ## 19. Security and Privacy References

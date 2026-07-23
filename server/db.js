@@ -1,10 +1,11 @@
 import pg from 'pg'
+import { databaseClientOptions } from './db-options.js'
 
 const { Pool } = pg
 
 export function createDatabase(config) {
   const pool = new Pool({
-    connectionString: config.databaseUrl,
+    ...databaseClientOptions(config.databaseUrl),
     max: 10,
     idleTimeoutMillis: 30_000,
   })

@@ -1,3 +1,5 @@
+import { isSupabaseDatabaseHost } from './db-options.js'
+
 const positiveInteger = (value, fallback, name, errors) => {
   const parsed = Number(value ?? fallback)
   if (!Number.isInteger(parsed) || parsed <= 0) {
@@ -110,6 +112,30 @@ export function loadConfig(env = process.env) {
   }
 
   if (nodeEnv === 'production') {
+    if (databaseUrl) {
+      let database
+      try {
+        database = new URL(databaseUrl)
+        if (!['postgres:', 'postgresql:'].includes(database.protocol)) throw new Error()
+      } catch {
+        errors.push('DATABASE_URL must be a valid PostgreSQL URL')
+      }
+      if (database) {
+        if (!isSupabaseDatabaseHost(database.hostname.toLowerCase())) {
+          errors.push('DATABASE_URL must use a Supabase database host in production')
+        }
+        if (!/^dental_portal_app(?:\.[a-z]{20})?$/.test(database.username)) {
+          errors.push(
+            'DATABASE_URL must use the least-privilege dental_portal_app role in production',
+          )
+        }
+        if (database.port !== '5432') {
+          errors.push(
+            'DATABASE_URL must use Supabase direct or session-pooler port 5432 in production',
+          )
+        }
+      }
+    }
     if (publicOrigin && !publicOrigin.startsWith('https://')) {
       errors.push('PUBLIC_ORIGIN must use HTTPS in production')
     }

@@ -1,21 +1,37 @@
 import { existsSync } from 'node:fs'
 import pg from 'pg'
 import { normalizeName } from '../server/auth.js'
+import {
+  databaseClientOptions,
+  isSupabaseDatabaseHost,
+} from '../server/db-options.js'
 
 if (existsSync('.env')) process.loadEnvFile('.env')
 
+const databaseUrl =
+  process.env.MIGRATION_DATABASE_URL || process.env.DATABASE_URL
+if (!databaseUrl) {
+  throw new Error('MIGRATION_DATABASE_URL or DATABASE_URL is required')
+}
+
+let isSupabase = false
+try {
+  isSupabase = isSupabaseDatabaseHost(new URL(databaseUrl).hostname.toLowerCase())
+} catch {
+  throw new Error('MIGRATION_DATABASE_URL or DATABASE_URL must be valid')
+}
+
 if (
-  process.env.NODE_ENV === 'production' &&
+  (process.env.NODE_ENV === 'production' || isSupabase) &&
   process.env.ALLOW_PRODUCTION_DEMO_SEED !== 'true'
 ) {
   throw new Error(
-    'Demo seed is disabled in production. Set ALLOW_PRODUCTION_DEMO_SEED=true only for an approved fictional-data environment.',
+    'Demo seed is disabled for production or Supabase. Set ALLOW_PRODUCTION_DEMO_SEED=true only for an approved fictional-data environment.',
   )
 }
-if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is required')
 
 const { Client } = pg
-const client = new Client({ connectionString: process.env.DATABASE_URL })
+const client = new Client(databaseClientOptions(databaseUrl))
 const ids = {
   patient: '10000000-0000-4000-8000-000000000001',
   dentist: '20000000-0000-4000-8000-000000000001',

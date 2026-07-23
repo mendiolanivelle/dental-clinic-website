@@ -1,12 +1,10 @@
 import { existsSync } from 'node:fs'
 import { buildApp } from './app.js'
 import { loadConfig } from './config.js'
-import { migrate } from './migrate.js'
 
 if (existsSync('.env')) process.loadEnvFile('.env')
 
 const config = loadConfig()
-await migrate(config.databaseUrl)
 const app = await buildApp({ config })
 
 const shutdown = async () => {

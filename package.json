@@ -9,6 +9,7 @@
     "dev:web": "vite",
     "build": "vite build",
     "migrate": "node server/migrate.js",
+    "migrate:supabase": "node scripts/migrate-supabase.js",
     "preview": "vite preview",
     "seed:demo": "node scripts/seed-demo.js",
     "start": "node server/index.js",
