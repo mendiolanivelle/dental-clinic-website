@@ -28,8 +28,12 @@ export default function LoginPage({ onAuthenticated }) {
         patientNumber: patientNumber.trim().toUpperCase(),
       })
       onAuthenticated(result.patient)
-    } catch {
-      setError('The name or patient ID is not recognized. Please check both details or call the clinic.')
+    } catch (requestError) {
+      setError(
+        requestError.status === 429
+          ? requestError.message
+          : 'The name or patient ID is not recognized. Please check both details or call the clinic.',
+      )
     } finally {
       setSubmitting(false)
     }

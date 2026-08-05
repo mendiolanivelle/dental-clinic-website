@@ -224,9 +224,10 @@ LOGIN_WINDOW_MINUTES=15
 ```
 
 Key attempts by the trusted client IP after the configured reverse-proxy hop.
-The limit must run before patient lookup and must apply equally to successful
-and failed submissions. Do not use a patient name or ID as a response-visible
-rate-limit key.
+Check the existing limit before patient lookup without consuming an attempt.
+Only a rejected credential pair increments the counter. Successful sign-ins
+and logout must not consume the failed-attempt budget. Do not use a patient
+name or ID as a response-visible rate-limit key.
 
 The in-process limiter assumes one Fastify replica. Before horizontal scaling,
 move the limit to a shared store or an approved edge control. Verify in
@@ -413,7 +414,8 @@ must verify the Supabase CA and hostname. Never set
 - Missing and extra login fields return `400`.
 - Exact valid details create one session and return the patient summary.
 - Unknown, mismatched, and disabled accounts return identical `401` bodies.
-- Rate limits apply to repeated valid and invalid attempts.
+- Repeated successful login/logout cycles remain available while repeated
+  invalid credentials reach the rate limit.
 - The production proxy supplies a trustworthy client IP for rate limiting.
 - The raw session token is not stored.
 - Cookie flags include `Secure`, `HttpOnly`, `SameSite=Lax`, and `Path=/`.

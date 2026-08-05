@@ -16,20 +16,32 @@ const auditMeta = (request, config) => ({
   userAgent: request.headers['user-agent'],
 })
 
+const rateLimitedError = Object.freeze({
+  error: {
+    code: 'RATE_LIMITED',
+    message: 'Too many incorrect attempts. Please wait and try again.',
+  },
+})
+
+const sendRateLimited = (reply, limit) =>
+  reply
+    .header('retry-after', String(Math.max(1, limit.ttlInSeconds)))
+    .code(429)
+    .send(rateLimitedError)
+
 export default async function authRoutes(
   app,
   { store, config, now, randomBytes, randomUUID },
 ) {
+  const checkLoginRateLimit = app.createRateLimit({
+    max: config.loginMaxAttempts,
+    timeWindow: config.loginWindowMinutes * 60_000,
+    keyGenerator: (request) => request.ip,
+  })
+
   app.post(
     '/api/auth/login',
     {
-      config: {
-        rateLimit: {
-          max: config.loginMaxAttempts,
-          timeWindow: config.loginWindowMinutes * 60_000,
-          keyGenerator: (request) => request.ip,
-        },
-      },
       schema: {
         body: {
           type: 'object',
@@ -54,6 +66,11 @@ export default async function authRoutes(
         })
       }
 
+      const currentLimit = await checkLoginRateLimit(request, {
+        increment: false,
+      })
+      if (currentLimit.isExceeded) return sendRateLimited(reply, currentLimit)
+
       const currentTime = now()
       const token = createSessionToken(randomBytes)
       const patient = await store.createSessionForLogin({
@@ -66,7 +83,11 @@ export default async function authRoutes(
         audit: auditMeta(request, config),
       })
 
-      if (!patient) return reply.code(401).send(genericLoginError)
+      if (!patient) {
+        const failedLimit = await checkLoginRateLimit(request)
+        if (failedLimit.isExceeded) return sendRateLimited(reply, failedLimit)
+        return reply.code(401).send(genericLoginError)
+      }
       reply.setCookie(SESSION_COOKIE, token, {
         ...sessionCookieOptions,
         maxAge: config.sessionAbsoluteHours * 60 * 60,

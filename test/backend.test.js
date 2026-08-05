@@ -359,7 +359,7 @@ test('disabled portal access cannot create a session', async () => {
   assert.equal(disabled.statusCode, 401)
 })
 
-test('direct login is rate-limited per client IP', async () => {
+test('direct login counts only failed credentials toward the client IP limit', async () => {
   const limitedApp = await buildApp({
     config: { ...config, loginMaxAttempts: 2 },
     store: new MemoryStore(),
@@ -368,21 +368,39 @@ test('direct login is rate-limited per client IP', async () => {
   })
   await limitedApp.ready()
   try {
+    const validPayload = {
+      fullName: 'Patricia Portal Demo',
+      patientNumber: 'PT-DEMO01',
+    }
     const payload = {
       fullName: 'Unknown Demo Person',
       patientNumber: 'PT-NOBODY',
     }
-    const inject = () =>
+    const inject = (loginPayload) =>
       limitedApp.inject({
         method: 'POST',
         url: '/api/auth/login',
         headers: { origin: config.publicOrigin },
-        payload,
+        payload: loginPayload,
       })
-    assert.equal((await inject()).statusCode, 401)
-    assert.equal((await inject()).statusCode, 401)
-    const limited = await inject()
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const loggedIn = await inject(validPayload)
+      assert.equal(loggedIn.statusCode, 200)
+      const cookie = loggedIn.headers['set-cookie'].split(';')[0]
+      const loggedOut = await limitedApp.inject({
+        method: 'POST',
+        url: '/api/auth/logout',
+        headers: { origin: config.publicOrigin, cookie },
+      })
+      assert.equal(loggedOut.statusCode, 204)
+    }
+
+    assert.equal((await inject(payload)).statusCode, 401)
+    assert.equal((await inject(payload)).statusCode, 401)
+    const limited = await inject(payload)
     assert.equal(limited.statusCode, 429, limited.body)
+    assert.equal(limited.json().error.code, 'RATE_LIMITED')
   } finally {
     await limitedApp.close()
   }

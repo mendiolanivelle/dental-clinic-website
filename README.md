@@ -50,8 +50,9 @@ Git or application logs.
 ## Authentication and privacy
 
 `POST /api/auth/login` accepts only `fullName` and `patientNumber`. The server
-normalizes both fields, applies strict attempt limits, and returns the same
-generic error for an unknown, disabled, or mismatched account.
+normalizes both fields, strictly limits failed credentials, and returns the
+same generic error for an unknown, disabled, or mismatched account. Successful
+sign-ins and logout do not consume the failed-attempt budget.
 
 Successful login creates a cryptographically random opaque session token. Only
 its SHA-256 digest is stored in PostgreSQL. The browser receives the token in a
