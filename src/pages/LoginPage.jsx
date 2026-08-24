@@ -40,8 +40,8 @@ const services = [
 
 function ServicesPanel() {
   return (
-    <div className="rounded-[28px] bg-white p-5 text-ink shadow-xl sm:p-6">
-      <div className="mb-6">
+    <div className="rounded-[28px] bg-white p-5 text-ink shadow-xl sm:p-6 lg:p-4 xl:p-5">
+      <div className="mb-6 lg:mb-4">
         <div>
           <div className="flex items-center gap-2 text-brand">
             <Sparkles size={18} />
@@ -52,9 +52,9 @@ function ServicesPanel() {
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 lg:gap-2 sm:grid-cols-2">
         {services.map((service) => (
-          <article className="rounded-2xl border border-ink/8 bg-cream/65 p-4 transition hover:border-brand/25 hover:bg-mint/35" key={service.name}>
+          <article className="rounded-2xl border border-ink/8 bg-cream/65 p-4 transition hover:border-brand/25 hover:bg-mint/35 lg:p-3" key={service.name}>
             <h3 className="font-extrabold">{service.name}</h3>
             <p className="mt-2 text-xs leading-5 text-ink/55">{service.description}</p>
             <p className="mt-3 inline-flex items-center gap-1.5 text-[11px] font-bold text-brand/75">

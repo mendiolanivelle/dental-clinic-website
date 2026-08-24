@@ -2,6 +2,8 @@ import { ArrowRight, Phone, ShieldCheck, Sparkles } from 'lucide-react'
 import BrandLogo from './BrandLogo'
 import ClinicPhoneLink, { clinicPhoneDisplay } from './ClinicPhoneLink'
 
+const servicesButtonClass = 'services-cta relative inline-flex items-center gap-2 rounded-xl bg-mint px-4 py-2.5 text-xs font-extrabold text-brand shadow-lg shadow-black/10 transition hover:bg-white'
+
 export default function AuthLayout({ children, servicesContent, title, description, onServicesClick, servicesActive }) {
   return (
     <main className="grid min-h-screen bg-cream lg:h-screen lg:grid-cols-[minmax(340px,.85fr)_1.15fr] lg:overflow-hidden">
@@ -10,7 +12,7 @@ export default function AuthLayout({ children, servicesContent, title, descripti
         <div className="absolute -bottom-40 -left-28 h-96 w-96 rounded-full bg-white/5" />
         <BrandLogo light />
         <button
-          className="services-cta relative mt-6 inline-flex w-fit items-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-extrabold text-brand shadow-lg shadow-black/10 transition hover:bg-mint"
+          className={`${servicesButtonClass} mt-6 w-fit`}
           type="button"
           onClick={onServicesClick}
           aria-controls="dental-services-panel"
@@ -35,7 +37,7 @@ export default function AuthLayout({ children, servicesContent, title, descripti
             </p>
           </div>
           <div
-            className={`col-start-1 row-start-1 self-center transition-all duration-500 ${servicesActive ? 'translate-x-0 opacity-100' : 'pointer-events-none translate-x-5 opacity-0'}`}
+            className={`col-start-1 row-start-1 self-center transition-all duration-500 ${servicesActive ? 'max-h-[calc(100vh-190px)] overflow-y-auto overscroll-contain pr-1 translate-x-0 opacity-100' : 'pointer-events-none translate-x-5 opacity-0'}`}
             id="dental-services-panel"
             aria-hidden={!servicesActive}
           >
@@ -57,7 +59,7 @@ export default function AuthLayout({ children, servicesContent, title, descripti
           <h1 className="mt-2 text-3xl font-extrabold tracking-tight sm:text-4xl">{title}</h1>
           <p className="mt-3 text-sm leading-6 text-ink/55">{description}</p>
           <button
-            className="services-cta mt-5 inline-flex items-center gap-2 rounded-xl bg-mint px-4 py-2.5 text-xs font-extrabold text-brand lg:hidden"
+            className={`${servicesButtonClass} mt-5 lg:hidden`}
             type="button"
             onClick={onServicesClick}
             aria-controls="mobile-dental-services-panel"
@@ -66,6 +68,7 @@ export default function AuthLayout({ children, servicesContent, title, descripti
           >
             <Sparkles size={15} />
             {servicesActive ? 'Back to patient login' : 'View dental services'}
+            <ArrowRight size={15} />
           </button>
           <div className="mt-8 rounded-[30px] bg-white p-6 soft-shadow sm:p-8 lg:mt-6 lg:p-6">
             {servicesActive && (
