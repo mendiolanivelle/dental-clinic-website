@@ -256,15 +256,13 @@ export default async function staffRoutes(
         body: {
           type: 'object',
           additionalProperties: false,
-          required: ['description', 'subtotalCents', 'discountCents', 'paymentAmountCents', 'paymentMethod'],
+          required: ['description', 'subtotalCents', 'paymentMethod', 'paymentConfirmed'],
           properties: {
             description: { type: 'string', minLength: 1, maxLength: 240 },
             subtotalCents: { type: 'integer', minimum: 1, maximum: 100_000_000 },
-            discountCents: { type: 'integer', minimum: 0, maximum: 100_000_000 },
-            paymentAmountCents: { type: 'integer', minimum: 1, maximum: 100_000_000 },
             paymentMethod: { type: 'string', enum: paymentMethods },
             paymentReference: { type: 'string', maxLength: 120 },
-            invoiceReference: { type: 'string', maxLength: 120 },
+            paymentConfirmed: { const: true },
           },
         },
       },
@@ -281,11 +279,8 @@ export default async function staffRoutes(
         staffId: request.staff.id,
         description,
         subtotalCents: request.body.subtotalCents,
-        discountCents: request.body.discountCents,
-        paymentAmountCents: request.body.paymentAmountCents,
         paymentMethod: request.body.paymentMethod,
         paymentReference: request.body.paymentReference?.trim() || null,
-        invoiceReference: request.body.invoiceReference?.trim() || null,
         now: now(),
       })
       if (result.outcome === 'not_found') {
@@ -300,7 +295,7 @@ export default async function staffRoutes(
       }
       if (result.outcome === 'invalid_amount') {
         return reply.code(400).send({
-          error: { code: 'INVALID_AMOUNT', message: 'The discount or payment is greater than the charge.' },
+          error: { code: 'INVALID_AMOUNT', message: 'The service charge must be greater than zero.' },
         })
       }
       await audit(request, 'staff.patient_checkout_created', 'patient_charge', result.charge.id)

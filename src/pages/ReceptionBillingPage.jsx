@@ -8,11 +8,8 @@ const methods = ['cash', 'gcash', 'maya', 'card', 'bank_transfer', 'other']
 const toCents = (value) => Math.round(Number(value || 0) * 100)
 const recordLabel = (number) => `PAY-${String(number).padStart(6, '0')}`
 
-function PaymentFields({ amount, setAmount, method, setMethod, reference, setReference, max }) {
-  return <div className="grid gap-4 sm:grid-cols-3">
-    <label className="text-sm font-extrabold">Amount received
-      <input className="mt-2 w-full rounded-2xl border border-ink/10 bg-white px-4 py-3 font-semibold" type="number" min="0.01" max={max} step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} required />
-    </label>
+function PaymentFields({ method, setMethod, reference, setReference }) {
+  return <div className="grid gap-4 sm:grid-cols-2">
     <label className="text-sm font-extrabold">Payment method
       <select className="mt-2 w-full rounded-2xl border border-ink/10 bg-white px-4 py-3 font-semibold" value={method} onChange={(event) => setMethod(event.target.value)}>
         {methods.map((value) => <option key={value} value={value}>{titleCase(value)}</option>)}
@@ -29,11 +26,9 @@ export default function ReceptionBillingPage() {
   const [checkout, setCheckout] = useState(null)
   const [description, setDescription] = useState('')
   const [subtotal, setSubtotal] = useState('')
-  const [discount, setDiscount] = useState('0')
-  const [amount, setAmount] = useState('')
   const [method, setMethod] = useState('cash')
   const [reference, setReference] = useState('')
-  const [invoiceReference, setInvoiceReference] = useState('')
+  const [paymentConfirmed, setPaymentConfirmed] = useState(false)
   const [payingCharge, setPayingCharge] = useState(null)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
@@ -63,11 +58,9 @@ export default function ReceptionBillingPage() {
     setCheckout(appointment)
     setDescription(appointment.typeName)
     setSubtotal('')
-    setDiscount('0')
-    setAmount('')
     setMethod('cash')
     setReference('')
-    setInvoiceReference('')
+    setPaymentConfirmed(false)
     setFormError('')
     setMessage('')
   }
@@ -75,10 +68,8 @@ export default function ReceptionBillingPage() {
   const submitCheckout = async (event) => {
     event.preventDefault()
     const subtotalCents = toCents(subtotal)
-    const discountCents = toCents(discount)
-    const paymentAmountCents = toCents(amount)
-    if (!description.trim() || subtotalCents <= 0 || discountCents < 0 || discountCents >= subtotalCents || paymentAmountCents <= 0 || paymentAmountCents > subtotalCents - discountCents) {
-      setFormError('Check the service, charge, discount, and amount received.')
+    if (!description.trim() || subtotalCents <= 0) {
+      setFormError('Enter the service performed and service charge.')
       return
     }
     setBusy(true)
@@ -87,11 +78,9 @@ export default function ReceptionBillingPage() {
       await api.checkoutAppointment(checkout.id, {
         description: description.trim(),
         subtotalCents,
-        discountCents,
-        paymentAmountCents,
         paymentMethod: method,
         paymentReference: reference.trim(),
-        invoiceReference: invoiceReference.trim(),
+        paymentConfirmed,
       })
       setCheckout(null)
       setMessage('Checkout recorded. The patient ledger is now up to date.')
@@ -105,15 +94,10 @@ export default function ReceptionBillingPage() {
 
   const submitPayment = async (event, charge) => {
     event.preventDefault()
-    const amountCents = toCents(amount)
-    if (amountCents <= 0 || amountCents > charge.balanceCents) {
-      setFormError('Enter an amount within the remaining balance.')
-      return
-    }
     setBusy(true)
     setFormError('')
     try {
-      await api.addPatientPayment(charge.id, { amountCents, method, reference: reference.trim() })
+      await api.addPatientPayment(charge.id, { amountCents: charge.balanceCents, method, reference: reference.trim() })
       setPayingCharge(null)
       setMessage('Payment recorded successfully.')
       load()
@@ -156,13 +140,7 @@ export default function ReceptionBillingPage() {
     .filter(({ status }) => status === 'posted')
     .reduce((sum, payment) => sum + payment.amountCents, 0)
   const subtotalCents = toCents(subtotal)
-  const discountCents = toCents(discount)
-  const paymentAmountCents = toCents(amount)
-  const canCompleteCheckout = Boolean(
-    checkout && description.trim() && subtotalCents > 0 && discountCents >= 0 &&
-    discountCents < subtotalCents && paymentAmountCents > 0 &&
-    paymentAmountCents <= subtotalCents - discountCents,
-  )
+  const canCompleteCheckout = Boolean(checkout && description.trim() && subtotalCents > 0 && paymentConfirmed)
 
   return <>
     <div className="mb-8">
@@ -195,20 +173,18 @@ export default function ReceptionBillingPage() {
           <div><p className="text-xs font-extrabold uppercase text-brand/60">Checkout patient</p><h3 className="mt-1 text-lg font-extrabold">{checkout.patient.displayName}</h3></div>
           <button className="text-xs font-extrabold text-ink/50" type="button" onClick={() => setCheckout(null)}>Cancel</button>
         </div>
-        <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="mt-5 grid gap-4 sm:grid-cols-2">
           <label className="text-sm font-extrabold sm:col-span-2">Service performed
             <input className="mt-2 w-full rounded-2xl border border-ink/10 bg-white px-4 py-3 font-semibold" maxLength="240" required value={description} onChange={(event) => setDescription(event.target.value)} />
           </label>
           <label className="text-sm font-extrabold">Service charge
             <input className="mt-2 w-full rounded-2xl border border-ink/10 bg-white px-4 py-3 font-semibold" type="number" min="0.01" step="0.01" required value={subtotal} onChange={(event) => setSubtotal(event.target.value)} placeholder="0.00" />
           </label>
-          <label className="text-sm font-extrabold">Discount
-            <input className="mt-2 w-full rounded-2xl border border-ink/10 bg-white px-4 py-3 font-semibold" type="number" min="0" step="0.01" value={discount} onChange={(event) => setDiscount(event.target.value)} />
-          </label>
         </div>
-        <div className="mt-4"><PaymentFields amount={amount} setAmount={setAmount} method={method} setMethod={setMethod} reference={reference} setReference={setReference} max={Math.max(0, Number(subtotal || 0) - Number(discount || 0))} /></div>
-        <label className="mt-4 block text-sm font-extrabold">BIR invoice reference <span className="font-normal text-ink/40">(optional)</span>
-          <input className="mt-2 w-full rounded-2xl border border-ink/10 bg-white px-4 py-3 font-semibold sm:max-w-sm" maxLength="120" value={invoiceReference} onChange={(event) => setInvoiceReference(event.target.value)} placeholder="Number from the clinic invoice" />
+        <div className="mt-4"><PaymentFields method={method} setMethod={setMethod} reference={reference} setReference={setReference} /></div>
+        <label className="mt-4 flex items-start gap-3 rounded-2xl bg-white p-4 text-sm font-extrabold">
+          <input className="mt-0.5 h-5 w-5 accent-brand" type="checkbox" checked={paymentConfirmed} onChange={(event) => setPaymentConfirmed(event.target.checked)} />
+          <span>Full service charge has been received</span>
         </label>
         <button className="mt-5 rounded-2xl bg-brand px-5 py-3 text-sm font-extrabold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-40" disabled={busy || !canCompleteCheckout} type="submit">{busy ? 'Recording…' : 'Complete checkout'}</button>
       </form>}
@@ -263,11 +239,11 @@ export default function ReceptionBillingPage() {
           <div className="flex flex-wrap items-center gap-2"><h3 className="font-extrabold">{selectedCharge.description}</h3><span className="rounded-full bg-white px-2.5 py-1 text-[10px] font-extrabold uppercase text-ink/55">{titleCase(selectedCharge.status)}</span></div>
           <p className="mt-1 text-sm text-ink/50">{selectedCharge.dentistName} · Checkout handled by {selectedCharge.handledBy}</p>
           <div className="mt-4 grid gap-3 sm:grid-cols-3"><div><p className="text-xs font-bold text-ink/40">Total</p><p className="mt-1 font-extrabold">{formatCurrency(selectedCharge.totalCents)}</p></div><div><p className="text-xs font-bold text-ink/40">Paid</p><p className="mt-1 font-extrabold">{formatCurrency(selectedCharge.paidCents)}</p></div><div><p className="text-xs font-bold text-ink/40">Balance</p><p className="mt-1 font-extrabold text-brand">{formatCurrency(selectedCharge.balanceCents)}</p></div></div>
-          {selectedCharge.invoiceReference && <p className="mt-3 text-xs text-ink/45">Invoice {selectedCharge.invoiceReference}</p>}
         </div>
-        {selectedCharge.balanceCents > 0 && payingCharge !== selectedCharge.id && <button className="mt-5 rounded-xl bg-brand px-4 py-2.5 text-xs font-extrabold text-white hover:bg-brand-dark" type="button" onClick={() => { setPayingCharge(selectedCharge.id); setAmount((selectedCharge.balanceCents / 100).toFixed(2)); setMethod('cash'); setReference(''); setFormError('') }}>Add payment</button>}
+        {selectedCharge.balanceCents > 0 && payingCharge !== selectedCharge.id && <button className="mt-5 rounded-xl bg-brand px-4 py-2.5 text-xs font-extrabold text-white hover:bg-brand-dark" type="button" onClick={() => { setPayingCharge(selectedCharge.id); setMethod('cash'); setReference(''); setFormError('') }}>Pay full balance</button>}
         {payingCharge === selectedCharge.id && <form className="mt-5 rounded-2xl bg-cream/70 p-4" onSubmit={(event) => submitPayment(event, selectedCharge)}>
-          <PaymentFields amount={amount} setAmount={setAmount} method={method} setMethod={setMethod} reference={reference} setReference={setReference} max={selectedCharge.balanceCents / 100} />
+          <p className="mb-4 text-sm font-extrabold">Payment total: {formatCurrency(selectedCharge.balanceCents)}</p>
+          <PaymentFields method={method} setMethod={setMethod} reference={reference} setReference={setReference} />
           {formError && <p className="mt-3 text-sm text-[#914b22]" role="alert">{formError}</p>}
           <div className="mt-4 flex gap-2"><button className="rounded-xl bg-brand px-4 py-2.5 text-xs font-extrabold text-white disabled:opacity-60" disabled={busy} type="submit">Record payment</button><button className="rounded-xl px-4 py-2.5 text-xs font-extrabold text-ink/50" type="button" onClick={() => setPayingCharge(null)}>Cancel</button></div>
         </form>}

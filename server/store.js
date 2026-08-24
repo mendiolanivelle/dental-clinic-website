@@ -646,11 +646,8 @@ export function createStore(db) {
       staffId,
       description,
       subtotalCents,
-      discountCents,
-      paymentAmountCents,
       paymentMethod,
       paymentReference,
-      invoiceReference,
       now,
     }) {
       return db.transaction(async (client) => {
@@ -662,8 +659,7 @@ export function createStore(db) {
           [appointmentId],
         )
         if (!selected.rowCount) return { outcome: 'not_found' }
-        const totalCents = subtotalCents - discountCents
-        if (totalCents <= 0 || paymentAmountCents <= 0 || paymentAmountCents > totalCents) {
+        if (subtotalCents <= 0) {
           return { outcome: 'invalid_amount' }
         }
 
@@ -681,9 +677,9 @@ export function createStore(db) {
               selected.rows[0].patient_id,
               description,
               subtotalCents,
-              discountCents,
-              totalCents,
-              invoiceReference,
+              0,
+              subtotalCents,
+              null,
               staffId,
               now,
             ],
@@ -698,7 +694,7 @@ export function createStore(db) {
              charge_id, amount_cents, method, external_reference,
              recorded_by_staff_id, received_at
            ) VALUES ($1, $2, $3, $4, $5, $6)`,
-          [chargeId, paymentAmountCents, paymentMethod, paymentReference, staffId, now],
+          [chargeId, subtotalCents, paymentMethod, paymentReference, staffId, now],
         )
         await updateChargeStatus(client, chargeId, now)
         await client.query(

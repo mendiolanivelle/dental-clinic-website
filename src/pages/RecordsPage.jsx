@@ -79,7 +79,6 @@ export default function RecordsPage() {
               <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-[.14em] text-ink/40"><ReceiptText size={15} />Billing & payments</h3><span className="text-[10px] font-bold text-ink/40">PAY-{String(charge.recordNumber).padStart(6, '0')}</span></div>
               <dl className="mt-3 grid grid-cols-3 gap-3 rounded-2xl bg-mint/45 p-4 text-xs"><div><dt className="text-ink/40">Total</dt><dd className="mt-1 font-extrabold">{formatCurrency(charge.totalCents)}</dd></div><div><dt className="text-ink/40">Paid</dt><dd className="mt-1 font-extrabold">{formatCurrency(charge.paidCents)}</dd></div><div><dt className="text-ink/40">Balance</dt><dd className="mt-1 font-extrabold text-brand">{formatCurrency(charge.balanceCents)}</dd></div></dl>
               {!!charge.payments.length && <div className="mt-4 space-y-2">{charge.payments.map((payment) => <div className="flex flex-wrap justify-between gap-2 text-xs text-ink/55" key={payment.id}><span>{formatDate(payment.receivedAt)} · {titleCase(payment.method)}</span><span className="font-extrabold">{formatCurrency(payment.amountCents)}</span></div>)}</div>}
-              {charge.invoiceReference && <p className="mt-4 text-xs font-bold text-ink/45">Clinic invoice reference: {charge.invoiceReference}</p>}
             </div>}
           </article>)}
         </section>

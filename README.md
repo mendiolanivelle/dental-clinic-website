@@ -79,10 +79,11 @@ rate limits and audit trail to reduce guessing attempts.
 ## Reception billing
 
 Confirmed appointments appear under **Billing & payments**. Reception records the
-final service charge, optional discount, amount received, payment method, external
-transaction reference, and optional BIR invoice number. Completing checkout marks
-the appointment completed. Unpaid and partially paid records remain open for later
-payments; posted payments can be voided with a required reason and are never deleted.
+final service charge, payment method, and optional external transaction reference.
+Reception must confirm that the full charge was received before checkout is enabled.
+Completing checkout records the full charge as paid and marks the appointment completed.
+Historical unpaid records remain open for full-balance payment; posted payments can be
+voided with a required reason and are never deleted.
 
 The portal stores amounts as integer centavos and never stores card numbers, CVVs,
 PINs, or wallet credentials. Cash, QR Ph, card-terminal, and bank payments are
