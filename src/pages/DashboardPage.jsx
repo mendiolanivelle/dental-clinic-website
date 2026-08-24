@@ -37,6 +37,7 @@ export default function DashboardPage() {
   const [dashboard, setDashboard] = useState(null)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [showAllServices, setShowAllServices] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -74,6 +75,7 @@ export default function DashboardPage() {
         : []
   const recentRecord = recentRecords[0] ? recordView(recentRecords[0]) : null
   const services = listFrom({ services: dashboard?.services }, 'services').map(serviceView)
+  const visibleServices = showAllServices ? services : services.slice(0, 6)
   const name = getName(patient).split(/\s+/)[0]
 
   return (
@@ -131,29 +133,43 @@ export default function DashboardPage() {
         </div>
 
         {services.length ? (
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {services.map((service) => (
-              <article className="flex flex-col rounded-2xl border border-ink/6 bg-cream/45 p-4" key={service.id}>
-                <div className="grid h-10 w-10 place-items-center rounded-xl bg-mint text-brand">
-                  <Sparkles size={18} />
-                </div>
-                <h3 className="mt-4 text-sm font-extrabold">{service.name}</h3>
-                <p className="mt-2 line-clamp-2 text-xs leading-5 text-ink/50">{service.description}</p>
-                {service.durationMinutes && (
-                  <p className="mt-3 inline-flex items-center gap-1.5 text-[11px] font-bold text-brand/70">
-                    <Clock3 size={13} />
-                    About {service.durationMinutes} minutes
-                  </p>
-                )}
-                <Link
-                  className="mt-4 inline-flex items-center gap-1.5 text-xs font-extrabold text-brand hover:text-brand-dark"
-                  to={`/portal/appointments?service=${encodeURIComponent(service.id)}`}
-                >
-                  Book this service <ArrowRight size={14} />
-                </Link>
-              </article>
-            ))}
-          </div>
+          <>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" id="services-list">
+              {visibleServices.map((service) => (
+                <article className="flex flex-col rounded-2xl border border-ink/6 bg-cream/45 p-4" key={service.id}>
+                  <div className="grid h-10 w-10 place-items-center rounded-xl bg-mint text-brand">
+                    <Sparkles size={18} />
+                  </div>
+                  <h3 className="mt-4 text-sm font-extrabold">{service.name}</h3>
+                  <p className="mt-2 line-clamp-2 text-xs leading-5 text-ink/50">{service.description}</p>
+                  {service.durationMinutes && (
+                    <p className="mt-3 inline-flex items-center gap-1.5 text-[11px] font-bold text-brand/70">
+                      <Clock3 size={13} />
+                      About {service.durationMinutes} minutes
+                    </p>
+                  )}
+                  <Link
+                    className="mt-4 inline-flex items-center gap-1.5 text-xs font-extrabold text-brand hover:text-brand-dark"
+                    to={`/portal/appointments?service=${encodeURIComponent(service.id)}`}
+                  >
+                    Book this service <ArrowRight size={14} />
+                  </Link>
+                </article>
+              ))}
+            </div>
+            {services.length > 6 && (
+              <button
+                className="mx-auto mt-5 flex items-center gap-1.5 rounded-xl bg-mint px-4 py-2.5 text-xs font-extrabold text-brand hover:bg-brand hover:text-white"
+                type="button"
+                onClick={() => setShowAllServices((visible) => !visible)}
+                aria-controls="services-list"
+                aria-expanded={showAllServices}
+              >
+                {showAllServices ? 'Show fewer services' : 'See more services'}
+                <ChevronRight className={`transition-transform ${showAllServices ? '-rotate-90' : 'rotate-90'}`} size={15} />
+              </button>
+            )}
+          </>
         ) : (
           <p className="rounded-2xl bg-cream/60 p-5 text-center text-sm text-ink/50">
             The clinic service catalog is being prepared. Please call us if you need help arranging care.
