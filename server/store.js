@@ -563,7 +563,7 @@ export function createStore(db) {
            JOIN dentists d ON d.id = a.dentist_id
            JOIN patients p ON p.id = a.patient_id
            WHERE (a.starts_at AT TIME ZONE 'Asia/Manila')::date = $1::date
-             AND a.status IN ('scheduled', 'confirmed')
+             AND a.status IN ('scheduled', 'confirmed', 'completed')
            ORDER BY a.starts_at ASC, d.display_name ASC`,
           [date],
         ),

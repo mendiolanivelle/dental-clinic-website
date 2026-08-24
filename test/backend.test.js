@@ -247,7 +247,18 @@ class MemoryStore {
   }
 
   async listReceptionCalendar() {
-    return { appointments: [], appointmentRequests: await this.listReceptionRequests() }
+    return {
+      appointments: this.appointments.map((appointment) => ({
+        ...appointment,
+        patient: {
+          id: appointment.patientId,
+          displayName: this.patient.displayName,
+          patientNumber: this.patient.patientNumber,
+          phone: '+639000000001',
+        },
+      })),
+      appointmentRequests: await this.listReceptionRequests(),
+    }
   }
 
   async listReceptionBilling() {
@@ -823,6 +834,13 @@ test('reception staff use a separate protected session and can confirm booking r
     assert.equal(checkout.json().charge.dentistName, 'Dr. Andrea Sample')
     assert.equal(checkout.json().charge.handledBy, 'Rina Reception')
     assert.equal(checkout.json().charge.payments[0].recordedBy, 'Rina Reception')
+
+    const completedCalendar = await staffApp.inject({
+      url: '/api/staff/calendar?date=2030-01-01',
+      headers: { cookie },
+    })
+    assert.equal(completedCalendar.statusCode, 200)
+    assert.equal(completedCalendar.json().appointments[0].status, 'completed')
 
     const finalPayment = await staffApp.inject({
       method: 'POST',
