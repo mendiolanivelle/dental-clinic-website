@@ -2,6 +2,14 @@ export function patientFrom(payload) {
   return payload?.patient || payload?.me || payload?.data?.patient || payload?.data || payload || {}
 }
 
+export function patientCredentialDetails(value) {
+  const credential = value.trim()
+  const digits = credential.replace(/\D/gu, '')
+  return /^[+0-9 ()-]+$/u.test(credential) && /^(?:09\d{9}|639\d{9})$/.test(digits)
+    ? { phone: credential }
+    : { patientNumber: credential.toUpperCase() }
+}
+
 export function listFrom(payload, key) {
   if (Array.isArray(payload)) return payload
   const value = payload?.[key] ?? payload?.data?.[key] ?? payload?.data

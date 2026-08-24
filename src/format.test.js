@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { calendarWeek, formatCurrency, formatDate, formatInterval, isInManilaPaymentPeriod, titleCase } from './format.js'
+import { patientCredentialDetails } from './portalData.js'
 
 test('patient-facing values use stable Manila-friendly formatting', () => {
   assert.equal(formatDate('2026-07-21'), 'July 21, 2026')
@@ -21,4 +22,9 @@ test('patient-facing values use stable Manila-friendly formatting', () => {
   assert.equal(isInManilaPaymentPeriod('2026-08-23T23:30:00+08:00', 'today', mondayInManila), false)
   assert.equal(isInManilaPaymentPeriod('2026-08-23T23:30:00+08:00', 'week', mondayInManila), true)
   assert.equal(isInManilaPaymentPeriod('2026-08-22T23:30:00+08:00', 'week', mondayInManila), false)
+  assert.deepEqual(patientCredentialDetails('0917 123 4567'), { phone: '0917 123 4567' })
+  assert.deepEqual(patientCredentialDetails('+63 917 123 4567'), { phone: '+63 917 123 4567' })
+  assert.deepEqual(patientCredentialDetails('pt-7k4n9q'), { patientNumber: 'PT-7K4N9Q' })
+  assert.deepEqual(patientCredentialDetails('PT-09171234567'), { patientNumber: 'PT-09171234567' })
+  assert.deepEqual(patientCredentialDetails('00001'), { patientNumber: '00001' })
 })

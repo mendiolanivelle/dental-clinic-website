@@ -4,6 +4,7 @@ import { ArrowRight, Clock3, IdCard, KeyRound, LockKeyhole, Mail, Phone, Sparkle
 import { api } from '../api'
 import AuthLayout from '../components/AuthLayout'
 import ClinicPhoneLink from '../components/ClinicPhoneLink'
+import { patientCredentialDetails } from '../portalData'
 
 const services = [
   {
@@ -76,9 +77,7 @@ export default function LoginPage({ onAuthenticated, onStaffAuthenticated }) {
   const location = useLocation()
   const [access, setAccess] = useState('patient')
   const [fullName, setFullName] = useState('')
-  const [patientNumber, setPatientNumber] = useState('')
-  const [patientLoginMethod, setPatientLoginMethod] = useState('patient_id')
-  const [mobileNumber, setMobileNumber] = useState('')
+  const [patientCredential, setPatientCredential] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -89,9 +88,8 @@ export default function LoginPage({ onAuthenticated, onStaffAuthenticated }) {
     event.preventDefault()
     setError('')
 
-    const patientCredential = patientLoginMethod === 'patient_id' ? patientNumber : mobileNumber
     if (access === 'patient' && (!fullName.trim() || !patientCredential.trim())) {
-      setError(`Enter your full name and ${patientLoginMethod === 'patient_id' ? 'patient ID' : 'mobile number'} to continue.`)
+      setError('Enter your full name and patient ID or mobile number to continue.')
       return
     }
     if (access === 'staff' && (!email.trim() || !password)) {
@@ -107,9 +105,7 @@ export default function LoginPage({ onAuthenticated, onStaffAuthenticated }) {
       } else {
         const result = await api.login({
           fullName: fullName.trim(),
-          ...(patientLoginMethod === 'patient_id'
-            ? { patientNumber: patientNumber.trim().toUpperCase() }
-            : { phone: mobileNumber.trim() }),
+          ...patientCredentialDetails(patientCredential),
         })
         onAuthenticated(result.patient)
       }
@@ -193,43 +189,28 @@ export default function LoginPage({ onAuthenticated, onStaffAuthenticated }) {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 rounded-2xl bg-cream p-1" aria-label="Choose patient login method">
-            {[
-              ['patient_id', 'Patient ID'],
-              ['mobile', 'Mobile number'],
-            ].map(([value, label]) => <button className={`rounded-xl px-3 py-2 text-xs font-extrabold transition ${patientLoginMethod === value ? 'bg-white text-brand shadow-sm' : 'text-ink/45 hover:text-brand'}`} key={value} type="button" aria-pressed={patientLoginMethod === value} onClick={() => { setPatientLoginMethod(value); setError('') }}>{label}</button>)}
-          </div>
-
-          {patientLoginMethod === 'patient_id' ? <div>
-            <label className="mb-2 block text-sm font-extrabold" htmlFor="patientNumber">Patient ID</label>
+          <div>
+            <label className="mb-2 block text-sm font-extrabold" htmlFor="patientCredential">Patient ID or mobile number</label>
             <div className="relative">
               <IdCard className="absolute left-4 top-1/2 -translate-y-1/2 text-ink/30" size={18} />
               <input
-                id="patientNumber"
-                name="patientNumber"
+                id="patientCredential"
+                name="patientCredential"
                 type="text"
                 autoComplete="off"
-                autoCapitalize="characters"
                 spellCheck="false"
-                className="input-field uppercase"
-                placeholder="PT-7K4N9Q"
-                value={patientNumber}
-                onChange={(event) => setPatientNumber(event.target.value)}
+                className="input-field"
+                placeholder="00001 or 0917 123 4567"
+                value={patientCredential}
+                onChange={(event) => setPatientCredential(event.target.value)}
                 disabled={submitting}
                 required
               />
             </div>
             <p className="mt-2 text-xs leading-5 text-ink/45">
-              Your patient ID is on the card or instructions given by the clinic.
+              Enter either one. The portal will recognize it automatically.
             </p>
-          </div> : <div>
-            <label className="mb-2 block text-sm font-extrabold" htmlFor="mobileNumber">Mobile number recorded by the clinic</label>
-            <div className="relative">
-              <Phone className="absolute left-4 top-1/2 -translate-y-1/2 text-ink/30" size={18} />
-              <input id="mobileNumber" name="mobileNumber" className="input-field" type="tel" autoComplete="tel" placeholder="0917 123 4567" value={mobileNumber} onChange={(event) => setMobileNumber(event.target.value)} disabled={submitting} required />
-            </div>
-            <p className="mt-2 text-xs leading-5 text-ink/45">Use the Philippine mobile number saved in your patient profile.</p>
-          </div>}
+          </div>
         </> : <>
           <div>
             <label className="mb-2 block text-sm font-extrabold" htmlFor="staffEmail">Work email</label>
@@ -288,13 +269,13 @@ export default function LoginPage({ onAuthenticated, onStaffAuthenticated }) {
         <p className="text-xs leading-5 text-ink/60">
           {access === 'staff'
             ? 'Use only your own staff account. All patient access and appointment changes are recorded.'
-            : `Use the exact full name and ${patientLoginMethod === 'patient_id' ? 'patient ID' : 'mobile number'} recorded by the clinic.`}
+            : 'Use the exact full name and either the patient ID or mobile number recorded by the clinic.'}
         </p>
       </div>
 
       <div className="mt-6 border-t border-ink/8 pt-5 text-center lg:mt-3 lg:pt-4">
         <p className="text-xs text-ink/50">
-          {access === 'staff' ? 'Need help with your staff account?' : 'Don’t have your patient ID?'}
+          {access === 'staff' ? 'Need help with your staff account?' : 'Don’t have your patient ID or recorded mobile number?'}
         </p>
         <ClinicPhoneLink className="mt-2 inline-flex items-center gap-1.5 text-sm font-extrabold text-brand hover:text-brand-dark">
           <Phone size={15} />
