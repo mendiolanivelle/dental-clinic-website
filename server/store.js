@@ -513,13 +513,15 @@ export function createStore(db) {
                patient_id, dentist_id, appointment_type_id, starts_at, ends_at,
                status, patient_instructions, created_at, updated_at
              )
-             SELECT $1, $2, $3, $4, $5, 'confirmed', $6, $7, $7
-             WHERE $4 > $7
+             SELECT $1, $2, $3, $4::timestamptz, $5::timestamptz,
+                    'confirmed', $6, $7::timestamptz, $7::timestamptz
+             WHERE $4::timestamptz > $7::timestamptz
                AND NOT EXISTS (
                  SELECT 1 FROM appointments a
                  WHERE a.dentist_id = $2
                    AND a.status IN ('scheduled', 'confirmed')
-                   AND a.starts_at < $5 AND a.ends_at > $4
+                   AND a.starts_at < $5::timestamptz
+                   AND a.ends_at > $4::timestamptz
                )
              ON CONFLICT (dentist_id, starts_at)
                WHERE status IN ('scheduled', 'confirmed')
