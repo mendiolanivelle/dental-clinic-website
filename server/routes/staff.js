@@ -247,6 +247,42 @@ export default async function staffRoutes(
     return { dentists }
   })
 
+  app.get('/api/staff/services', { preHandler: requireReception }, async (request) => {
+    const services = await store.listServices()
+    await audit(request, 'staff.services_listed')
+    return { services }
+  })
+
+  app.post(
+    '/api/staff/appointments',
+    {
+      preHandler: requireReception,
+      schema: {
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['patientId', 'dentistId', 'appointmentTypeId', 'startsAt'],
+          properties: {
+            patientId: { type: 'string', format: 'uuid' },
+            dentistId: { type: 'string', format: 'uuid' },
+            appointmentTypeId: { type: 'string', format: 'uuid' },
+            startsAt: { type: 'string', format: 'date-time' },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const result = await store.createReceptionAppointment({ ...request.body, now: now() })
+      if (result.outcome === 'slot_unavailable') {
+        return reply.code(409).send({
+          error: { code: 'SLOT_UNAVAILABLE', message: 'That patient, service, doctor, or time is unavailable.' },
+        })
+      }
+      await audit(request, 'staff.walk_in_appointment_created', 'appointment', result.id)
+      return reply.code(201).send({ appointmentId: result.id })
+    },
+  )
+
   app.patch(
     '/api/staff/appointments/:id/schedule',
     {

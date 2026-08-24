@@ -288,6 +288,35 @@ class MemoryStore {
     return this.dentists.filter(({ active }) => active).map(({ id, displayName }) => ({ id, displayName }))
   }
 
+  async createReceptionAppointment(input) {
+    const patient = input.patientId === this.patient.id ? this.patient : null
+    const dentist = this.dentists.find((item) => item.id === input.dentistId && item.active)
+    const service = this.services.find((item) => item.id === input.appointmentTypeId)
+    const start = new Date(input.startsAt)
+    const end = new Date(start.getTime() + 60 * 60_000)
+    const local = new Date(start.getTime() + 8 * 60 * 60_000)
+    const valid = start > input.now && local.getUTCDay() >= 1 && local.getUTCDay() <= 6 &&
+      local.getUTCHours() >= 9 && local.getUTCHours() < 17 &&
+      local.getUTCMinutes() === 0 && local.getUTCSeconds() === 0
+    const overlaps = this.appointments.some((item) =>
+      (item.dentistId === input.dentistId || item.patientId === input.patientId) &&
+      ['scheduled', 'confirmed'].includes(item.status) &&
+      new Date(item.startsAt) < end && new Date(item.endsAt) > start)
+    if (!patient || !dentist || !service || !valid || overlaps) return { outcome: 'slot_unavailable' }
+    const appointment = {
+      id: '32000000-0000-4000-8000-000000000001',
+      patientId: patient.id,
+      typeName: service.name,
+      startsAt: start.toISOString(),
+      endsAt: end.toISOString(),
+      status: 'confirmed',
+      dentistId: dentist.id,
+      dentistName: dentist.displayName,
+    }
+    this.appointments.push(appointment)
+    return { outcome: 'created', id: appointment.id }
+  }
+
   async rescheduleReceptionAppointment({ id, dentistId, startsAt, now }) {
     const appointment = this.appointments.find(
       (item) => item.id === id && ['scheduled', 'confirmed'].includes(item.status),
@@ -301,7 +330,7 @@ class MemoryStore {
       local.getUTCMinutes() === 0 && local.getUTCSeconds() === 0
     const dentist = this.dentists.find((item) => item.id === dentistId && item.active)
     const overlaps = this.appointments.some((item) =>
-      item.id !== id && item.dentistId === dentistId &&
+      item.id !== id && (item.dentistId === dentistId || item.patientId === appointment.patientId) &&
       ['scheduled', 'confirmed'].includes(item.status) &&
       new Date(item.startsAt) < end && new Date(item.endsAt) > start)
     if (!valid || !dentist || overlaps) return { outcome: 'slot_unavailable' }
@@ -939,6 +968,9 @@ test('reception staff use a separate protected session and can confirm booking r
     const dentists = await staffApp.inject({ url: '/api/staff/dentists', headers: { cookie } })
     assert.equal(dentists.statusCode, 200)
     assert.equal(dentists.json().dentists.length, 2)
+    const services = await staffApp.inject({ url: '/api/staff/services', headers: { cookie } })
+    assert.equal(services.statusCode, 200)
+    assert.equal(services.json().services.length, 2)
 
     const conflictingReschedule = await staffApp.inject({
       method: 'PATCH',
@@ -956,14 +988,42 @@ test('reception staff use a separate protected session and can confirm booking r
       url: '/api/staff/appointments/30000000-0000-4000-8000-000000000003/schedule',
       headers: { origin: config.publicOrigin, cookie },
       payload: {
-        startsAt: '2030-01-01T02:00:00.000Z',
+        startsAt: '2030-01-03T02:00:00.000Z',
         dentistId: staffStore.dentists[1].id,
       },
     })
     assert.equal(rescheduled.statusCode, 204)
-    assert.equal(staffStore.appointments.at(-1).startsAt, '2030-01-01T02:00:00.000Z')
-    assert.equal(staffStore.appointments.at(-1).endsAt, '2030-01-01T03:00:00.000Z')
+    assert.equal(staffStore.appointments.at(-1).startsAt, '2030-01-03T02:00:00.000Z')
+    assert.equal(staffStore.appointments.at(-1).endsAt, '2030-01-03T03:00:00.000Z')
     assert.equal(staffStore.appointments.at(-1).dentistName, 'Dr. Marco Reyes')
+
+    const conflictingWalkIn = await staffApp.inject({
+      method: 'POST',
+      url: '/api/staff/appointments',
+      headers: { origin: config.publicOrigin, cookie },
+      payload: {
+        patientId: staffStore.patient.id,
+        dentistId: staffStore.dentist.id,
+        appointmentTypeId: staffStore.services[0].id,
+        startsAt: '2030-01-01T02:00:00.000Z',
+      },
+    })
+    assert.equal(conflictingWalkIn.statusCode, 409)
+
+    const walkIn = await staffApp.inject({
+      method: 'POST',
+      url: '/api/staff/appointments',
+      headers: { origin: config.publicOrigin, cookie },
+      payload: {
+        patientId: staffStore.patient.id,
+        dentistId: staffStore.dentist.id,
+        appointmentTypeId: staffStore.services[0].id,
+        startsAt: '2030-01-04T02:00:00.000Z',
+      },
+    })
+    assert.equal(walkIn.statusCode, 201)
+    assert.equal(staffStore.appointments.at(-1).status, 'confirmed')
+    assert.equal(staffStore.appointments.at(-1).typeName, 'Cleaning')
 
     const checkoutWithoutConfirmation = await staffApp.inject({
       method: 'POST',

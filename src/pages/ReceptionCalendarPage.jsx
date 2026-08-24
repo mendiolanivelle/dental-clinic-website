@@ -2,12 +2,15 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   CalendarClock,
   CalendarDays,
+  CalendarPlus,
   ChevronLeft,
   ChevronRight,
   Clock3,
   IdCard,
   Phone,
+  Search,
   Stethoscope,
+  UserRound,
   X,
 } from 'lucide-react'
 import { api } from '../api'
@@ -24,6 +27,16 @@ const hourlyTimes = Array.from({ length: 8 }, (_, index) => `${String(index + 9)
 const manilaDateTime = (value) => {
   const local = new Date(new Date(value).getTime() + 8 * 60 * 60_000).toISOString()
   return { date: local.slice(0, 10), time: local.slice(11, 16) }
+}
+const nextClinicSlot = () => {
+  const now = new Date()
+  for (let offset = 0; offset < 8; offset += 1) {
+    const date = shiftDate(manilaToday(), offset)
+    if (new Date(`${date}T00:00:00Z`).getUTCDay() === 0) continue
+    const time = hourlyTimes.find((value) => new Date(`${date}T${value}:00+08:00`) > now)
+    if (time) return { date, time }
+  }
+  return { date: manilaToday(), time: '09:00' }
 }
 
 const dayItems = (day) => [
@@ -135,29 +148,127 @@ function BookingDetails({ booking, close, dentists, onRescheduled }) {
   </div>
 }
 
+function WalkInSchedule({ close, dentists, services, onCreated }) {
+  const initialSchedule = nextClinicSlot()
+  const [query, setQuery] = useState('')
+  const [patients, setPatients] = useState([])
+  const [patient, setPatient] = useState(null)
+  const [searched, setSearched] = useState(false)
+  const [dentistId, setDentistId] = useState(dentists[0]?.id || '')
+  const [serviceId, setServiceId] = useState(services[0]?.id || '')
+  const [date, setDate] = useState(initialSchedule.date)
+  const [time, setTime] = useState(initialSchedule.time)
+  const [searching, setSearching] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    const onKeyDown = (event) => event.key === 'Escape' && close()
+    document.body.style.overflow = 'hidden'
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.body.style.overflow = ''
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [close])
+
+  const searchPatients = async () => {
+    if (query.trim().length < 2) {
+      setError('Enter at least two letters of the patient name or their patient ID.')
+      return
+    }
+    setSearching(true)
+    setError('')
+    try {
+      const data = await api.searchReceptionPatients(query.trim())
+      setPatients(data.patients || [])
+      setPatient(null)
+      setSearched(true)
+    } catch (requestError) {
+      setError(requestError.message || 'Patient search failed.')
+    } finally {
+      setSearching(false)
+    }
+  }
+
+  const submit = async (event) => {
+    event.preventDefault()
+    if (!patient) {
+      setError('Search for and select the walk-in patient first.')
+      return
+    }
+    setBusy(true)
+    setError('')
+    try {
+      await api.createReceptionAppointment({
+        patientId: patient.id,
+        dentistId,
+        appointmentTypeId: serviceId,
+        startsAt: new Date(`${date}T${time}:00+08:00`).toISOString(),
+      })
+      await onCreated(date)
+    } catch (requestError) {
+      setError(requestError.message || 'The walk-in appointment could not be scheduled.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return <div className="fixed inset-0 z-50 grid place-items-center bg-ink/40 p-4 backdrop-blur-sm" onMouseDown={(event) => event.target === event.currentTarget && close()}>
+    <form aria-labelledby="walk-in-title" aria-modal="true" className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-[30px] bg-white p-6 soft-shadow sm:p-8" onSubmit={submit} role="dialog">
+      <div className="flex items-start justify-between gap-4">
+        <div><p className="text-xs font-extrabold uppercase tracking-[.16em] text-brand/60">Reception calendar</p><h2 className="mt-2 text-2xl font-extrabold" id="walk-in-title">Schedule a walk-in</h2></div>
+        <button aria-label="Close walk-in scheduler" className="rounded-xl bg-cream p-2.5 text-ink/55 hover:bg-mint" onClick={close} type="button"><X size={19} /></button>
+      </div>
+
+      <div className="mt-6">
+        <label className="text-sm font-extrabold">Find registered patient</label>
+        <div className="mt-2 flex gap-2">
+          <div className="relative flex-1"><Search className="absolute left-4 top-1/2 -translate-y-1/2 text-ink/30" size={17} /><input className="input-field !pl-11" placeholder="Patient name or ID" value={query} onChange={(event) => { setQuery(event.target.value); setPatients([]); setPatient(null); setSearched(false) }} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); searchPatients() } }} /></div>
+          <button className="rounded-xl bg-brand px-4 text-xs font-extrabold text-white disabled:opacity-50" disabled={searching} onClick={searchPatients} type="button">{searching ? 'Searching…' : 'Search'}</button>
+        </div>
+        {!!patients.length && <div className="mt-3 max-h-40 space-y-2 overflow-y-auto">{patients.map((item) => <button className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left text-sm ${patient?.id === item.id ? 'border-brand bg-mint' : 'border-ink/8 hover:bg-cream'}`} key={item.id} onClick={() => { setPatient(item); setError('') }} type="button"><UserRound className="shrink-0 text-brand" size={17} /><span className="min-w-0 flex-1"><strong className="block truncate">{item.displayName}</strong><span className="text-xs text-ink/45">{item.patientNumber}</span></span></button>)}</div>}
+        {searched && !patients.length && !searching && <p className="mt-3 text-xs text-ink/45">No registered patient found. <a className="font-extrabold text-brand" href="/reception/patients">Create an account in the Patients tab</a>, then return here.</p>}
+      </div>
+
+      <div className="mt-6 grid gap-4 sm:grid-cols-2">
+        <label className="text-sm font-extrabold">Service<select className="input-field mt-2" required value={serviceId} onChange={(event) => setServiceId(event.target.value)}>{services.map((service) => <option key={service.id} value={service.id}>{service.name}</option>)}</select></label>
+        <label className="text-sm font-extrabold">Dentist<select className="input-field mt-2" required value={dentistId} onChange={(event) => setDentistId(event.target.value)}>{dentists.map((dentist) => <option key={dentist.id} value={dentist.id}>{dentist.displayName}</option>)}</select></label>
+        <label className="text-sm font-extrabold">Date<input className="input-field mt-2" type="date" min={manilaToday()} required value={date} onChange={(event) => setDate(event.target.value)} /></label>
+        <label className="text-sm font-extrabold">Time<select className="input-field mt-2" required value={time} onChange={(event) => setTime(event.target.value)}>{hourlyTimes.map((value) => <option key={value} value={value}>{formatTime(new Date(`2000-01-01T${value}:00+08:00`))}</option>)}</select></label>
+      </div>
+      {error && <p className="mt-4 rounded-xl bg-[#fff0e7] p-3 text-sm text-[#914b22]" role="alert">{error}</p>}
+      <button className="mt-6 rounded-xl bg-brand px-5 py-3 text-sm font-extrabold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50" disabled={busy || !patient || !dentistId || !serviceId} type="submit">{busy ? 'Scheduling…' : 'Create appointment'}</button>
+    </form>
+  </div>
+}
+
 export default function ReceptionCalendarPage() {
   const today = manilaToday()
   const [weekStart, setWeekStart] = useState(() => calendarWeek(today)[0])
   const [selected, setSelected] = useState(null)
+  const [showWalkIn, setShowWalkIn] = useState(false)
   const [message, setMessage] = useState('')
-  const [state, setState] = useState({ loading: true, days: [], dentists: [], error: null })
+  const [state, setState] = useState({ loading: true, days: [], dentists: [], services: [], error: null })
 
   const load = useCallback(async () => {
-    setState({ loading: true, days: [], dentists: [], error: null })
+    setState({ loading: true, days: [], dentists: [], services: [], error: null })
     try {
       const dates = calendarWeek(weekStart)
-      const [calendars, dentistData] = await Promise.all([
+      const [calendars, dentistData, serviceData] = await Promise.all([
         Promise.all(dates.map((date) => api.getReceptionCalendar(date))),
         api.getReceptionDentists(),
+        api.getReceptionServices(),
       ])
       setState({
         loading: false,
         error: null,
         dentists: dentistData.dentists || [],
+        services: serviceData.services || [],
         days: calendars.map((calendar, index) => ({ date: dates[index], items: dayItems(calendar) })),
       })
     } catch (error) {
-      setState({ loading: false, days: [], dentists: [], error })
+      setState({ loading: false, days: [], dentists: [], services: [], error })
     }
   }, [weekStart])
   useEffect(() => { load() }, [load])
@@ -173,6 +284,7 @@ export default function ReceptionCalendarPage() {
         <p className="mt-2 text-sm text-ink/50">Sunday to Saturday · Select a booking to view its details.</p>
       </div>
       <div className="flex flex-wrap items-center gap-2">
+        <button className="inline-flex items-center gap-2 rounded-xl bg-brand px-4 py-2.5 text-xs font-extrabold text-white shadow-sm hover:bg-brand-dark disabled:opacity-50" disabled={!state.dentists.length || !state.services.length} onClick={() => { setShowWalkIn(true); setMessage('') }} type="button"><CalendarPlus size={17} /> Schedule walk-in</button>
         <button aria-label="Previous week" className="rounded-xl bg-white p-2.5 text-brand shadow-sm hover:bg-mint" onClick={() => setWeekStart(shiftDate(weekStart, -7))} type="button"><ChevronLeft size={19} /></button>
         <button className="rounded-xl bg-white px-4 py-2.5 text-xs font-extrabold text-brand shadow-sm hover:bg-mint" onClick={() => setWeekStart(calendarWeek(today)[0])} type="button">This week</button>
         <button aria-label="Next week" className="rounded-xl bg-white p-2.5 text-brand shadow-sm hover:bg-mint" onClick={() => setWeekStart(shiftDate(weekStart, 7))} type="button"><ChevronRight size={19} /></button>
@@ -208,5 +320,6 @@ export default function ReceptionCalendarPage() {
         </div>}
 
     {selected && <BookingDetails booking={selected} close={() => setSelected(null)} dentists={state.dentists} onRescheduled={async () => { setSelected(null); setMessage('Appointment schedule and dentist updated.'); await load() }} />}
+    {showWalkIn && <WalkInSchedule close={() => setShowWalkIn(false)} dentists={state.dentists} services={state.services} onCreated={async (date) => { setShowWalkIn(false); setMessage('Walk-in appointment added to the calendar.'); const targetWeek = calendarWeek(date)[0]; if (targetWeek === weekStart) await load(); else setWeekStart(targetWeek) }} />}
   </>
 }

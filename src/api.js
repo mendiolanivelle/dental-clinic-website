@@ -94,6 +94,11 @@ export const api = {
   getReceptionCalendar: (date) =>
     request(`/api/staff/calendar?date=${encodeURIComponent(date)}`),
   getReceptionDentists: () => request('/api/staff/dentists'),
+  getReceptionServices: () => request('/api/staff/services'),
+  createReceptionAppointment: (details) => request('/api/staff/appointments', {
+    method: 'POST',
+    body: json(details),
+  }),
   rescheduleReceptionAppointment: (id, details) => request(`/api/staff/appointments/${id}/schedule`, {
     method: 'PATCH',
     body: json(details),

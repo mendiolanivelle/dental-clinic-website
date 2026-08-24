@@ -615,6 +615,56 @@ export function createStore(db) {
       return result.rows.map((row) => ({ id: row.id, displayName: row.display_name }))
     },
 
+    async createReceptionAppointment({ patientId, dentistId, appointmentTypeId, startsAt, now }) {
+      try {
+        const result = await db.query(
+          `INSERT INTO appointments (
+             patient_id, dentist_id, appointment_type_id, starts_at, ends_at,
+             status, created_at, updated_at
+           )
+           SELECT p.id, d.id, t.id, $4::timestamptz,
+                  $4::timestamptz + interval '1 hour', 'confirmed', $5, $5
+           FROM patients p
+           CROSS JOIN dentists d
+           CROSS JOIN appointment_types t
+           WHERE p.id = $1
+             AND d.id = $2 AND d.active = true
+             AND t.id = $3
+             AND $4::timestamptz > $5
+             AND EXTRACT(ISODOW FROM $4::timestamptz AT TIME ZONE 'Asia/Manila') BETWEEN 1 AND 6
+             AND ($4::timestamptz AT TIME ZONE 'Asia/Manila')::time >= time '09:00'
+             AND ($4::timestamptz AT TIME ZONE 'Asia/Manila')::time < time '17:00'
+             AND EXTRACT(MINUTE FROM $4::timestamptz AT TIME ZONE 'Asia/Manila') = 0
+             AND EXTRACT(SECOND FROM $4::timestamptz AT TIME ZONE 'Asia/Manila') = 0
+             AND NOT EXISTS (
+               SELECT 1 FROM appointments a
+               WHERE (a.dentist_id = d.id OR a.patient_id = p.id)
+                 AND a.status IN ('scheduled', 'confirmed')
+                 AND a.starts_at < $4::timestamptz + interval '1 hour'
+                 AND a.ends_at > $4::timestamptz
+             )
+             AND NOT EXISTS (
+               SELECT 1 FROM appointment_requests r
+               WHERE (r.dentist_id = d.id OR r.patient_id = p.id)
+                 AND r.status IN ('requested', 'confirmed')
+                 AND r.requested_start_at < $4::timestamptz + interval '1 hour'
+                 AND r.requested_end_at > $4::timestamptz
+             )
+           ON CONFLICT (dentist_id, starts_at)
+             WHERE status IN ('scheduled', 'confirmed')
+             DO NOTHING
+           RETURNING id`,
+          [patientId, dentistId, appointmentTypeId, startsAt, now],
+        )
+        return result.rowCount
+          ? { outcome: 'created', id: result.rows[0].id }
+          : { outcome: 'slot_unavailable' }
+      } catch (error) {
+        if (error.code === '23505') return { outcome: 'slot_unavailable' }
+        throw error
+      }
+    },
+
     async listReceptionBilling(date) {
       const [appointments, charges, totals] = await Promise.all([
         db.query(
@@ -683,20 +733,20 @@ export function createStore(db) {
                AND NOT EXISTS (
                  SELECT 1 FROM appointments a
                  WHERE a.id <> $1
-                   AND a.dentist_id = $4
+                   AND (a.dentist_id = $4 OR a.patient_id = $5)
                    AND a.status IN ('scheduled', 'confirmed')
                    AND a.starts_at < $2::timestamptz + interval '1 hour'
                    AND a.ends_at > $2::timestamptz
                )
                AND NOT EXISTS (
                  SELECT 1 FROM appointment_requests r
-                 WHERE r.dentist_id = $4
+                 WHERE (r.dentist_id = $4 OR r.patient_id = $5)
                    AND r.status IN ('requested', 'confirmed')
                    AND r.requested_start_at < $2::timestamptz + interval '1 hour'
                    AND r.requested_end_at > $2::timestamptz
                )
              RETURNING id`,
-            [id, startsAt, now, dentistId],
+            [id, startsAt, now, dentistId, selected.rows[0].patient_id],
           )
           if (!updated.rowCount) return { outcome: 'slot_unavailable' }
           await client.query(

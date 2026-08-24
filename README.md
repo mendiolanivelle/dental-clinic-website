@@ -117,7 +117,8 @@ calendar uses active dentists and hides conflicts with scheduled, confirmed,
 or already-requested visits. The initial clinic schedule is Monday–Saturday,
 9:00 AM–5:00 PM Manila time, in one-hour slots. Reception can change the dentist,
 date, and time from an active appointment's calendar details; occupied or invalid
-slots are rejected.
+slots are rejected. The calendar's **Schedule walk-in** action searches registered
+patients and creates a confirmed appointment directly without a booking request.
 
 ## Verification
 
