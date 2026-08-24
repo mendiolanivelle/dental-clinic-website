@@ -206,7 +206,9 @@ export function createStore(db) {
     const result = await db.query(
       `${appointmentSelect}
        WHERE a.patient_id = $1
-         AND a.starts_at ${upcoming ? '>=' : '<'} $2
+         AND ${upcoming
+    ? "a.starts_at >= $2 AND a.status IN ('scheduled', 'confirmed')"
+    : "(a.starts_at < $2 OR a.status IN ('completed', 'cancelled', 'no_show'))"}
        ORDER BY a.starts_at ${upcoming ? 'ASC' : 'DESC'}`,
       [patientId, now],
     )

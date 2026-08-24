@@ -69,6 +69,16 @@ class MemoryStore {
         id: '30000000-0000-4000-8000-000000000099',
         typeName: 'Private appointment',
       },
+      {
+        patientId: this.patient.id,
+        id: '30000000-0000-4000-8000-000000000002',
+        typeName: 'Completed future visit',
+        startsAt: '2030-01-01T03:00:00.000Z',
+        endsAt: '2030-01-01T04:00:00.000Z',
+        status: 'completed',
+        dentistId: this.dentist.id,
+        dentistName: 'Dr. Andrea Sample',
+      },
     ]
     this.records = [
       {
@@ -481,9 +491,12 @@ class MemoryStore {
     return result
   }
 
-  async listAppointments(patientId) {
+  async listAppointments(patientId, scope, now) {
+    const upcoming = scope === 'upcoming'
     return this.appointments
-      .filter((appointment) => appointment.patientId === patientId)
+      .filter((appointment) => appointment.patientId === patientId && (upcoming
+        ? new Date(appointment.startsAt) >= now && ['scheduled', 'confirmed'].includes(appointment.status)
+        : new Date(appointment.startsAt) < now || ['completed', 'cancelled', 'no_show'].includes(appointment.status)))
       .map(({ patientId: _patientId, ...appointment }) => appointment)
   }
 
@@ -1024,6 +1037,15 @@ test('patient endpoints require authentication and enforce patient ownership and
     ['30000000-0000-4000-8000-000000000001'],
   )
   assert.equal(appointments.headers['cache-control'], 'no-store')
+
+  const pastAppointments = await app.inject({
+    url: '/api/me/appointments?scope=past',
+    headers: { cookie },
+  })
+  assert.deepEqual(
+    pastAppointments.json().appointments.map(({ id }) => id),
+    ['30000000-0000-4000-8000-000000000002'],
+  )
 
   const otherAppointment = await app.inject({
     url: '/api/me/appointments/30000000-0000-4000-8000-000000000099',

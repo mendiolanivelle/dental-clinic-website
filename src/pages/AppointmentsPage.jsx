@@ -168,7 +168,7 @@ function BookingRequestForm({ services, selectedServiceId, onServiceChange, onCr
   }
 
   return (
-    <section className="mb-8 rounded-3xl bg-white p-5 soft-shadow sm:p-6" aria-labelledby="booking-heading">
+    <section className="rounded-3xl bg-white p-5 soft-shadow sm:p-6" aria-labelledby="booking-heading">
       <div className="mb-5">
         <p className="text-xs font-extrabold uppercase tracking-[.18em] text-brand/60">Request a visit</p>
         <h2 id="booking-heading" className="mt-1 text-xl font-extrabold">Book an appointment</h2>
@@ -385,13 +385,6 @@ export default function AppointmentsPage() {
             </section>
           )}
 
-          <BookingRequestForm
-            services={services}
-            selectedServiceId={selectedServiceId}
-            onServiceChange={setSelectedServiceId}
-            onCreated={(request) => setAppointmentRequests((current) => [request, ...current])}
-          />
-
         <div className="space-y-10">
           <section aria-labelledby="upcoming-heading">
             <div className="mb-4 flex items-center gap-3">
@@ -423,6 +416,13 @@ export default function AppointmentsPage() {
               />
             )}
           </section>
+
+          <BookingRequestForm
+            services={services}
+            selectedServiceId={selectedServiceId}
+            onServiceChange={setSelectedServiceId}
+            onCreated={(request) => setAppointmentRequests((current) => [request, ...current])}
+          />
 
           <section aria-labelledby="past-heading">
             <div className="mb-4 flex items-center gap-3">
