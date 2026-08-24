@@ -368,13 +368,6 @@ export default function AppointmentsPage() {
         <ErrorState error={error} onRetry={load} />
       ) : (
         <>
-          <BookingRequestForm
-            services={services}
-            selectedServiceId={selectedServiceId}
-            onServiceChange={setSelectedServiceId}
-            onCreated={(request) => setAppointmentRequests((current) => [request, ...current])}
-          />
-
           {appointmentRequests.length > 0 && (
             <section className="mb-10" aria-labelledby="booking-requests-heading">
               <div className="mb-4 flex items-center gap-3">
@@ -391,6 +384,13 @@ export default function AppointmentsPage() {
               </div>
             </section>
           )}
+
+          <BookingRequestForm
+            services={services}
+            selectedServiceId={selectedServiceId}
+            onServiceChange={setSelectedServiceId}
+            onCreated={(request) => setAppointmentRequests((current) => [request, ...current])}
+          />
 
         <div className="space-y-10">
           <section aria-labelledby="upcoming-heading">
