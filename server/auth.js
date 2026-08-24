@@ -1,6 +1,7 @@
 import { createHash, createHmac, randomBytes } from 'node:crypto'
 
 export const SESSION_COOKIE = '__Host-portal_session'
+export const STAFF_SESSION_COOKIE = '__Host-staff_session'
 
 export const normalizeName = (value) =>
   value.normalize('NFKC').trim().replace(/\s+/gu, ' ').toLocaleLowerCase('en')

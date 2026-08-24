@@ -25,6 +25,8 @@ export function loadConfig(env = process.env) {
     'PUBLIC_ORIGIN',
     errors,
   )
+  const supabaseUrlValue = env.SUPABASE_URL?.trim()
+  const supabasePublishableKey = env.SUPABASE_PUBLISHABLE_KEY?.trim()
 
   if (!['development', 'test', 'production'].includes(nodeEnv)) {
     errors.push('NODE_ENV must be development, test, or production')
@@ -39,6 +41,22 @@ export function loadConfig(env = process.env) {
     publicOrigin = url.origin
   } catch {
     errors.push('PUBLIC_ORIGIN must be an origin without a path, query, or fragment')
+  }
+
+  let supabaseUrl
+  if (supabaseUrlValue) {
+    try {
+      const url = new URL(supabaseUrlValue)
+      if (url.protocol !== 'https:' || url.origin !== supabaseUrlValue.replace(/\/$/, '')) {
+        throw new Error()
+      }
+      supabaseUrl = url.origin
+    } catch {
+      errors.push('SUPABASE_URL must be an HTTPS origin without a path')
+    }
+  }
+  if (Boolean(supabaseUrlValue) !== Boolean(supabasePublishableKey)) {
+    errors.push('SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY must be configured together')
   }
 
   if (sessionPepper && Buffer.byteLength(sessionPepper) < 32) {
@@ -119,5 +137,7 @@ export function loadConfig(env = process.env) {
     sessionAbsoluteHours,
     loginMaxAttempts,
     loginWindowMinutes,
+    supabaseUrl,
+    supabasePublishableKey,
   })
 }

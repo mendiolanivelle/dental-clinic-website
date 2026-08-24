@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useLocation } from 'react-router-dom'
-import { ArrowRight, Clock3, IdCard, LockKeyhole, Phone, Sparkles, UserRound } from 'lucide-react'
+import { ArrowRight, Clock3, IdCard, KeyRound, LockKeyhole, Mail, Phone, Sparkles, UserRound } from 'lucide-react'
 import { api } from '../api'
 import AuthLayout from '../components/AuthLayout'
 import ClinicPhoneLink from '../components/ClinicPhoneLink'
@@ -72,10 +72,13 @@ function ServicesPanel() {
   )
 }
 
-export default function LoginPage({ onAuthenticated }) {
+export default function LoginPage({ onAuthenticated, onStaffAuthenticated }) {
   const location = useLocation()
+  const [access, setAccess] = useState('patient')
   const [fullName, setFullName] = useState('')
   const [patientNumber, setPatientNumber] = useState('')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [showServices, setShowServices] = useState(false)
@@ -84,23 +87,34 @@ export default function LoginPage({ onAuthenticated }) {
     event.preventDefault()
     setError('')
 
-    if (!fullName.trim() || !patientNumber.trim()) {
+    if (access === 'patient' && (!fullName.trim() || !patientNumber.trim())) {
       setError('Enter your full name and patient ID to continue.')
+      return
+    }
+    if (access === 'staff' && (!email.trim() || !password)) {
+      setError('Enter your work email and password to continue.')
       return
     }
 
     setSubmitting(true)
     try {
-      const result = await api.login({
-        fullName: fullName.trim(),
-        patientNumber: patientNumber.trim().toUpperCase(),
-      })
-      onAuthenticated(result.patient)
+      if (access === 'staff') {
+        const result = await api.staffLogin({ email: email.trim(), password })
+        onStaffAuthenticated(result.staff)
+      } else {
+        const result = await api.login({
+          fullName: fullName.trim(),
+          patientNumber: patientNumber.trim().toUpperCase(),
+        })
+        onAuthenticated(result.patient)
+      }
     } catch (requestError) {
       setError(
         requestError.status === 429
           ? requestError.message
-          : 'The name or patient ID is not recognized. Please check both details or call the clinic.',
+          : access === 'staff'
+            ? requestError.message || 'The email or password is not recognized.'
+            : 'The name or patient ID is not recognized. Please check both details or call the clinic.',
       )
     } finally {
       setSubmitting(false)
@@ -109,13 +123,41 @@ export default function LoginPage({ onAuthenticated }) {
 
   return (
     <AuthLayout
-      title="Welcome back"
-      description="Enter the details provided by your clinic to securely view your dental care information."
+      accessLabel={access === 'staff' ? 'Clinic staff access' : 'Patient access'}
+      title={access === 'staff' ? 'Reception portal' : 'Welcome back'}
+      description={access === 'staff'
+        ? 'Sign in with your clinic-provided staff account to manage patients and appointments.'
+        : 'Enter the details provided by your clinic to securely view your dental care information.'}
+      footer={access === 'staff'
+        ? 'Staff access is restricted to clinic-provisioned accounts and recorded for security.'
+        : undefined}
       servicesContent={<ServicesPanel />}
       onServicesClick={() => setShowServices((visible) => !visible)}
       servicesActive={showServices}
     >
       <>
+      <div className="mb-6 grid grid-cols-2 rounded-2xl bg-cream p-1" aria-label="Choose portal access">
+        {[
+          ['patient', 'Patient'],
+          ['staff', 'Clinic staff'],
+        ].map(([value, label]) => (
+          <button
+            key={value}
+            className={`rounded-xl px-3 py-2.5 text-sm font-extrabold transition ${
+              access === value ? 'bg-white text-brand shadow-sm' : 'text-ink/45 hover:text-brand'
+            }`}
+            type="button"
+            aria-pressed={access === value}
+            onClick={() => {
+              setAccess(value)
+              setError('')
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       {location.state?.sessionExpired && (
         <div className="mb-5 rounded-2xl bg-[#fff4e9] px-4 py-3 text-sm leading-6 text-[#8b4d21]" role="status">
           Your session expired to keep your records private. Please sign in again.
@@ -123,53 +165,88 @@ export default function LoginPage({ onAuthenticated }) {
       )}
 
       <form className="space-y-5 lg:space-y-4" onSubmit={handleSubmit}>
-        <div>
-          <label className="mb-2 block text-sm font-extrabold" htmlFor="fullName">
-            Full name as recorded by the clinic
-          </label>
-          <div className="relative">
-            <UserRound className="absolute left-4 top-1/2 -translate-y-1/2 text-ink/30" size={18} />
-            <input
-              id="fullName"
-              name="fullName"
-              type="text"
-              autoComplete="name"
-              autoCapitalize="words"
-              className="input-field"
-              placeholder="First Middle Last"
-              value={fullName}
-              onChange={(event) => setFullName(event.target.value)}
-              disabled={submitting}
-              required
-            />
+        {access === 'patient' ? <>
+          <div>
+            <label className="mb-2 block text-sm font-extrabold" htmlFor="fullName">
+              Full name as recorded by the clinic
+            </label>
+            <div className="relative">
+              <UserRound className="absolute left-4 top-1/2 -translate-y-1/2 text-ink/30" size={18} />
+              <input
+                id="fullName"
+                name="fullName"
+                type="text"
+                autoComplete="name"
+                autoCapitalize="words"
+                className="input-field"
+                placeholder="First Middle Last"
+                value={fullName}
+                onChange={(event) => setFullName(event.target.value)}
+                disabled={submitting}
+                required
+              />
+            </div>
           </div>
-        </div>
 
-        <div>
-          <label className="mb-2 block text-sm font-extrabold" htmlFor="patientNumber">
-            Patient ID
-          </label>
-          <div className="relative">
-            <IdCard className="absolute left-4 top-1/2 -translate-y-1/2 text-ink/30" size={18} />
-            <input
-              id="patientNumber"
-              name="patientNumber"
-              type="text"
-              autoComplete="off"
-              autoCapitalize="characters"
-              spellCheck="false"
-              className="input-field uppercase"
-              placeholder="PT-7K4N9Q"
-              value={patientNumber}
-              onChange={(event) => setPatientNumber(event.target.value)}
-              disabled={submitting}
-              required
-            />
+          <div>
+            <label className="mb-2 block text-sm font-extrabold" htmlFor="patientNumber">Patient ID</label>
+            <div className="relative">
+              <IdCard className="absolute left-4 top-1/2 -translate-y-1/2 text-ink/30" size={18} />
+              <input
+                id="patientNumber"
+                name="patientNumber"
+                type="text"
+                autoComplete="off"
+                autoCapitalize="characters"
+                spellCheck="false"
+                className="input-field uppercase"
+                placeholder="PT-7K4N9Q"
+                value={patientNumber}
+                onChange={(event) => setPatientNumber(event.target.value)}
+                disabled={submitting}
+                required
+              />
+            </div>
+            <p className="mt-2 text-xs leading-5 text-ink/45">
+              Your patient ID is on the card or instructions given by the clinic.
+            </p>
           </div>
-          <p className="mt-2 text-xs leading-5 text-ink/45">
-            Your patient ID is on the card or instructions given by the clinic.
-          </p>
-        </div>
+        </> : <>
+          <div>
+            <label className="mb-2 block text-sm font-extrabold" htmlFor="staffEmail">Work email</label>
+            <div className="relative">
+              <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-ink/30" size={18} />
+              <input
+                id="staffEmail"
+                className="input-field"
+                type="email"
+                autoComplete="username"
+                placeholder="reception@clinic.com"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                disabled={submitting}
+                required
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="mb-2 block text-sm font-extrabold" htmlFor="staffPassword">Password</label>
+            <div className="relative">
+              <KeyRound className="absolute left-4 top-1/2 -translate-y-1/2 text-ink/30" size={18} />
+              <input
+                id="staffPassword"
+                className="input-field"
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                disabled={submitting}
+                required
+              />
+            </div>
+          </div>
+        </>}
 
         {error && (
           <p className="rounded-2xl bg-[#fff0e7] px-4 py-3 text-sm leading-6 text-[#914b22]" role="alert">
@@ -182,7 +259,7 @@ export default function LoginPage({ onAuthenticated }) {
           type="submit"
           disabled={submitting}
         >
-          {submitting ? 'Signing in…' : 'Open my portal'}
+          {submitting ? 'Signing in…' : access === 'staff' ? 'Open reception portal' : 'Open my portal'}
           {!submitting && <ArrowRight size={18} />}
         </button>
       </form>
@@ -190,12 +267,16 @@ export default function LoginPage({ onAuthenticated }) {
       <div className="mt-6 flex gap-3 rounded-2xl bg-mint/65 p-4 lg:mt-4">
         <LockKeyhole className="mt-0.5 shrink-0 text-brand" size={18} />
         <p className="text-xs leading-5 text-ink/60">
-          Use the exact full name and patient ID recorded by the clinic.
+          {access === 'staff'
+            ? 'Use only your own staff account. All patient access and appointment changes are recorded.'
+            : 'Use the exact full name and patient ID recorded by the clinic.'}
         </p>
       </div>
 
       <div className="mt-6 border-t border-ink/8 pt-5 text-center lg:mt-4">
-        <p className="text-xs text-ink/50">Don’t have your patient ID?</p>
+        <p className="text-xs text-ink/50">
+          {access === 'staff' ? 'Need help with your staff account?' : 'Don’t have your patient ID?'}
+        </p>
         <ClinicPhoneLink className="mt-2 inline-flex items-center gap-1.5 text-sm font-extrabold text-brand hover:text-brand-dark">
           <Phone size={15} />
           Call the clinic

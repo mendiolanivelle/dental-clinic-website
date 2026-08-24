@@ -4,7 +4,7 @@ import ClinicPhoneLink, { clinicPhoneDisplay } from './ClinicPhoneLink'
 
 const servicesButtonClass = 'services-cta relative inline-flex items-center gap-2 rounded-xl bg-mint px-4 py-2.5 text-xs font-extrabold text-brand shadow-lg shadow-black/10 transition hover:bg-white'
 
-export default function AuthLayout({ children, servicesContent, title, description, onServicesClick, servicesActive }) {
+export default function AuthLayout({ children, servicesContent, title, description, accessLabel = 'Patient access', footer, onServicesClick, servicesActive }) {
   return (
     <main className="grid min-h-screen bg-cream lg:h-screen lg:grid-cols-[minmax(340px,.85fr)_1.15fr] lg:overflow-hidden">
       <section className="relative hidden overflow-hidden bg-brand p-8 text-white lg:flex lg:flex-col xl:p-12">
@@ -20,7 +20,7 @@ export default function AuthLayout({ children, servicesContent, title, descripti
           aria-pressed={servicesActive}
         >
           <Sparkles size={17} />
-          {servicesActive ? 'Back to patient login' : 'View dental services'}
+          {servicesActive ? 'Back to login' : 'View dental services'}
           <ArrowRight size={16} />
         </button>
         <div className="relative my-auto grid w-full max-w-xl">
@@ -55,7 +55,7 @@ export default function AuthLayout({ children, servicesContent, title, descripti
           <div className="mb-10 lg:hidden">
             <BrandLogo />
           </div>
-          <p className="text-xs font-extrabold uppercase tracking-[.2em] text-brand/60">Patient access</p>
+          <p className="text-xs font-extrabold uppercase tracking-[.2em] text-brand/60">{accessLabel}</p>
           <h1 className="mt-2 text-3xl font-extrabold tracking-tight sm:text-4xl">{title}</h1>
           <p className="mt-3 text-sm leading-6 text-ink/55">{description}</p>
           <button
@@ -67,7 +67,7 @@ export default function AuthLayout({ children, servicesContent, title, descripti
             aria-pressed={servicesActive}
           >
             <Sparkles size={15} />
-            {servicesActive ? 'Back to patient login' : 'View dental services'}
+            {servicesActive ? 'Back to login' : 'View dental services'}
             <ArrowRight size={15} />
           </button>
           <div className="mt-8 rounded-[30px] bg-white p-6 soft-shadow sm:p-8 lg:mt-6 lg:p-6">
@@ -79,7 +79,7 @@ export default function AuthLayout({ children, servicesContent, title, descripti
             {children}
           </div>
           <p className="mt-6 text-center text-xs leading-5 text-ink/45 lg:mt-4">
-            This portal is for clinic-provisioned patients. Your information is never stored in this browser.
+            {footer || 'This portal is for clinic-provisioned patients. Your information is never stored in this browser.'}
           </p>
         </div>
       </section>

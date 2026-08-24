@@ -24,6 +24,14 @@ class MemoryStore {
       patientNumber: 'PT-DEMO01',
       enabled: true,
     }
+    this.staff = {
+      id: '80000000-0000-4000-8000-000000000001',
+      authUserId: '90000000-0000-4000-8000-000000000001',
+      displayName: 'Rina Reception',
+      email: 'reception@dental.test',
+      role: 'receptionist',
+      active: true,
+    }
     this.otherPatientId = '10000000-0000-4000-8000-000000000002'
     this.dentist = {
       id: '20000000-0000-4000-8000-000000000001',
@@ -108,6 +116,7 @@ class MemoryStore {
       },
     ]
     this.sessions = new Map()
+    this.staffSessions = new Map()
     this.audits = []
     this.healthy = true
   }
@@ -164,6 +173,35 @@ class MemoryStore {
     if (session) session.revokedAt = now
   }
 
+  async createStaffSessionForLogin(input) {
+    if (!this.staff.active || input.authUserId !== this.staff.authUserId) return null
+    this.staffSessions.set(input.tokenDigest, {
+      staff: this.staff,
+      lastSeenAt: input.now,
+      absoluteExpiresAt: input.absoluteExpiresAt,
+      revokedAt: null,
+    })
+    this.audits.push({
+      actorType: 'staff',
+      actorId: this.staff.id,
+      action: 'staff.login_succeeded',
+      ...input.audit,
+    })
+    return this.staff
+  }
+
+  async authenticateStaffSession(tokenDigest, now, idleCutoff) {
+    const session = this.staffSessions.get(tokenDigest)
+    if (!session || session.revokedAt || session.absoluteExpiresAt <= now || session.lastSeenAt < idleCutoff || !session.staff.active) return null
+    session.lastSeenAt = now
+    return session.staff
+  }
+
+  async revokeStaffSession(tokenDigest, now) {
+    const session = this.staffSessions.get(tokenDigest)
+    if (session) session.revokedAt = now
+  }
+
   async addAudit(event) {
     this.audits.push(event)
   }
@@ -185,6 +223,60 @@ class MemoryStore {
     return this.appointmentRequests
       .filter((request) => request.patientId === patientId)
       .map(({ patientId: _patientId, ...request }) => request)
+  }
+
+  async getReceptionDashboard() {
+    return {
+      pendingRequests: this.appointmentRequests.filter(({ status }) => status === 'requested').length,
+      todayAppointments: [],
+      todayRequests: [],
+    }
+  }
+
+  async listReceptionRequests() {
+    return this.appointmentRequests.map(({ patientId: _patientId, ...request }) => ({
+      ...request,
+      patient: {
+        id: this.patient.id,
+        displayName: this.patient.displayName,
+        patientNumber: this.patient.patientNumber,
+        phone: '+639000000001',
+      },
+    }))
+  }
+
+  async listReceptionCalendar() {
+    return { appointments: [], appointmentRequests: await this.listReceptionRequests() }
+  }
+
+  async updateReceptionRequest({ id, action }) {
+    const request = this.appointmentRequests.find((item) => item.id === id && item.status === 'requested')
+    if (!request) return { outcome: 'not_found' }
+    request.status = action === 'confirm' ? 'confirmed' : 'declined'
+    if (action === 'confirm') {
+      this.appointments.push({
+        id: '31000000-0000-4000-8000-000000000001',
+        patientId: request.patientId,
+        typeName: request.serviceName,
+        startsAt: request.requestedStartAt,
+        endsAt: request.requestedEndAt,
+        status: 'confirmed',
+        dentistId: request.dentistId,
+        dentistName: request.dentistName,
+      })
+    }
+    return { outcome: 'updated' }
+  }
+
+  async searchReceptionPatients(query) {
+    return `${this.patient.displayName} ${this.patient.patientNumber}`.toLowerCase().includes(query.toLowerCase())
+      ? [{
+          id: this.patient.id,
+          displayName: this.patient.displayName,
+          patientNumber: this.patient.patientNumber,
+          phone: '+639000000001',
+        }]
+      : []
   }
 
   async listAvailability(date, now) {
@@ -495,6 +587,94 @@ test('direct login counts only failed credentials toward the client IP limit', a
   }
 })
 
+test('reception staff use a separate protected session and can confirm booking requests', async () => {
+  const staffStore = new MemoryStore()
+  staffStore.appointmentRequests.push({
+    patientId: staffStore.patient.id,
+    id: '70000000-0000-4000-8000-000000000010',
+    serviceId: staffStore.services[0].id,
+    serviceName: staffStore.services[0].name,
+    dentistId: staffStore.dentist.id,
+    dentistName: staffStore.dentist.displayName,
+    requestedStartAt: '2030-01-02T01:00:00.000Z',
+    requestedEndAt: '2030-01-02T02:00:00.000Z',
+    preferredDate: '2030-01-02',
+    timePreference: 'morning',
+    patientNote: 'Please confirm.',
+    status: 'requested',
+    clinicNote: null,
+    createdAt: currentTime.toISOString(),
+  })
+  const staffApp = await buildApp({
+    config,
+    store: staffStore,
+    staticDir: false,
+    logger: false,
+    verifyStaffCredentials: async ({ email, password }) =>
+      email === staffStore.staff.email && password === 'correct-password'
+        ? { authUserId: staffStore.staff.authUserId, email }
+        : null,
+  })
+  await staffApp.ready()
+  const staffPost = (url, payload) => staffApp.inject({
+    method: 'POST',
+    url,
+    headers: { origin: config.publicOrigin },
+    payload,
+  })
+  try {
+    const invalid = await staffPost('/api/staff/auth/login', {
+      email: staffStore.staff.email,
+      password: 'wrong-password',
+    })
+    assert.equal(invalid.statusCode, 401)
+    assert.equal(invalid.json().error.code, 'INVALID_CREDENTIALS')
+
+    const loggedIn = await staffPost('/api/staff/auth/login', {
+      email: staffStore.staff.email,
+      password: 'correct-password',
+    })
+    assert.equal(loggedIn.statusCode, 200)
+    assert.equal(loggedIn.json().staff.role, 'receptionist')
+    const setCookie = loggedIn.headers['set-cookie']
+    assert.match(setCookie, /__Host-staff_session=/)
+    const cookie = setCookie.split(';')[0]
+    assert.ok(staffStore.staffSessions.has(sha256(cookie.split('=')[1])))
+
+    const me = await staffApp.inject({ url: '/api/staff/me', headers: { cookie } })
+    assert.equal(me.statusCode, 200)
+    assert.equal(me.json().staff.displayName, 'Rina Reception')
+    assert.equal((await staffApp.inject({ url: '/api/staff/me' })).statusCode, 401)
+
+    const patients = await staffApp.inject({
+      url: '/api/staff/patients?q=Patricia',
+      headers: { cookie },
+    })
+    assert.equal(patients.statusCode, 200)
+    assert.equal(patients.json().patients[0].patientNumber, 'PT-DEMO01')
+
+    const confirmed = await staffApp.inject({
+      method: 'PATCH',
+      url: '/api/staff/appointment-requests/70000000-0000-4000-8000-000000000010',
+      headers: { origin: config.publicOrigin, cookie },
+      payload: { action: 'confirm' },
+    })
+    assert.equal(confirmed.statusCode, 204)
+    assert.equal(staffStore.appointmentRequests[0].status, 'confirmed')
+    assert.ok(staffStore.appointments.some(({ id }) => id === '31000000-0000-4000-8000-000000000001'))
+
+    const logout = await staffApp.inject({
+      method: 'POST',
+      url: '/api/staff/auth/logout',
+      headers: { origin: config.publicOrigin, cookie },
+    })
+    assert.equal(logout.statusCode, 204)
+    assert.equal((await staffApp.inject({ url: '/api/staff/me', headers: { cookie } })).statusCode, 401)
+  } finally {
+    await staffApp.close()
+  }
+})
+
 test('patient endpoints require authentication and enforce patient ownership and publication', async () => {
   const unauthenticated = await app.inject({ url: '/api/me/appointments' })
   assert.equal(unauthenticated.statusCode, 401)
@@ -659,6 +839,10 @@ test('SPA deep links return the React application while unknown API routes stay 
     assert.equal(deepLink.statusCode, 200)
     assert.match(deepLink.headers['content-type'], /text\/html/)
     assert.match(deepLink.body, /id="root"/)
+
+    const receptionLink = await staticApp.inject({ url: '/reception/calendar' })
+    assert.equal(receptionLink.statusCode, 200)
+    assert.match(receptionLink.body, /id="root"/)
 
     const missingApi = await staticApp.inject({ url: '/api/does-not-exist' })
     assert.equal(missingApi.statusCode, 404)

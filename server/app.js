@@ -7,13 +7,15 @@ import helmet from '@fastify/helmet'
 import rateLimit from '@fastify/rate-limit'
 import fastifyStatic from '@fastify/static'
 import { randomBytes, randomUUID } from 'node:crypto'
-import { authRequiredError, SESSION_COOKIE, sha256 } from './auth.js'
+import { authRequiredError, SESSION_COOKIE, STAFF_SESSION_COOKIE, sessionCookieOptions, sha256 } from './auth.js'
 import { loadConfig } from './config.js'
 import { createDatabase } from './db.js'
 import { createStore } from './store.js'
 import authRoutes from './routes/auth.js'
 import healthRoutes from './routes/health.js'
 import patientRoutes from './routes/patient.js'
+import staffRoutes from './routes/staff.js'
+import { createStaffCredentialVerifier } from './staff-auth.js'
 
 const defaultStaticDirectory = fileURLToPath(new URL('../dist/', import.meta.url))
 const stateChangingMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
@@ -27,6 +29,7 @@ export async function buildApp({
   randomUUIDFn = randomUUID,
   staticDir = defaultStaticDirectory,
   logger = config.nodeEnv !== 'test',
+  verifyStaffCredentials,
 } = {}) {
   const app = Fastify({
     ajv: {
@@ -72,6 +75,7 @@ export async function buildApp({
   await app.register(rateLimit, { global: false })
 
   app.decorateRequest('patient', null)
+  app.decorateRequest('staff', null)
   app.decorate('authenticate', async (request, reply) => {
     const token = request.cookies[SESSION_COOKIE]
     if (!token) return reply.code(401).send(authRequiredError)
@@ -95,6 +99,24 @@ export async function buildApp({
     }
     request.patient = patient
   })
+  app.decorate('authenticateStaff', async (request, reply) => {
+    const token = request.cookies[STAFF_SESSION_COOKIE]
+    if (!token) return reply.code(401).send(authRequiredError)
+    const currentTime = now()
+    const idleCutoff = new Date(
+      currentTime.getTime() - config.sessionIdleMinutes * 60_000,
+    )
+    const staff = await store.authenticateStaffSession(
+      sha256(token),
+      currentTime,
+      idleCutoff,
+    )
+    if (!staff) {
+      reply.clearCookie(STAFF_SESSION_COOKIE, sessionCookieOptions)
+      return reply.code(401).send(authRequiredError)
+    }
+    request.staff = staff
+  })
 
   app.addHook('onRequest', async (request, reply) => {
     if (
@@ -114,6 +136,7 @@ export async function buildApp({
   app.addHook('onSend', async (request, reply, payload) => {
     if (
       request.url.startsWith('/api/auth/') ||
+      request.url.startsWith('/api/staff/') ||
       request.url === '/api/me' ||
       request.url.startsWith('/api/me/')
     ) {
@@ -131,6 +154,15 @@ export async function buildApp({
     randomUUID: randomUUIDFn,
   })
   await app.register(patientRoutes, { store, config, now })
+  await app.register(staffRoutes, {
+    store,
+    config,
+    now,
+    randomBytes: randomBytesFn,
+    randomUUID: randomUUIDFn,
+    verifyStaffCredentials:
+      verifyStaffCredentials || createStaffCredentialVerifier(config),
+  })
 
   const hasStaticFiles = Boolean(staticDir && existsSync(path.join(staticDir, 'index.html')))
   if (hasStaticFiles) {
@@ -153,7 +185,8 @@ export async function buildApp({
       request.method === 'GET' &&
       (request.url === '/' ||
         request.url.startsWith('/login') ||
-        request.url.startsWith('/portal'))
+        request.url.startsWith('/portal') ||
+        request.url.startsWith('/reception'))
     ) {
       return reply.type('text/html').sendFile('index.html')
     }

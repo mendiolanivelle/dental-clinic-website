@@ -73,4 +73,25 @@ export const api = {
   getAppointments: (scope) => request(`/api/me/appointments?scope=${encodeURIComponent(scope)}`),
   getRecords: () => request('/api/me/records'),
   getTreatmentPlan: () => request('/api/me/treatment-plan'),
+  staffLogin: (details) => request('/api/staff/auth/login', {
+    method: 'POST',
+    body: json(details),
+    notifyUnauthorized: false,
+  }),
+  staffLogout: () => request('/api/staff/auth/logout', {
+    method: 'POST',
+    notifyUnauthorized: false,
+  }),
+  getStaffMe: ({ notifyUnauthorized = true } = {}) =>
+    request('/api/staff/me', { notifyUnauthorized }),
+  getReceptionDashboard: () => request('/api/staff/dashboard'),
+  getReceptionRequests: () => request('/api/staff/appointment-requests'),
+  updateReceptionRequest: (id, details) => request(`/api/staff/appointment-requests/${id}`, {
+    method: 'PATCH',
+    body: json(details),
+  }),
+  getReceptionCalendar: (date) =>
+    request(`/api/staff/calendar?date=${encodeURIComponent(date)}`),
+  searchReceptionPatients: (query) =>
+    request(`/api/staff/patients?q=${encodeURIComponent(query)}`),
 }

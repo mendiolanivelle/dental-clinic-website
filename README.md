@@ -1,10 +1,14 @@
-# SmileCare Dental Patient Portal
+# SmileCare Dental Portal
 
 A patient portal built with React, Vite, Tailwind CSS, Fastify, and
 Supabase-hosted PostgreSQL. Patients sign in with the full name recorded by the
 clinic and their clinic-issued patient ID. They can browse the clinic service
 catalog and choose an open doctor time from the hourly appointment calendar. There
-is no registration, password, SMS, or one-time-code step.
+is no patient registration, password, SMS, or one-time-code step.
+
+Clinic reception staff use the same login page with a separate **Clinic staff**
+tab. Supabase Auth verifies clinic-provisioned staff accounts, while the backend
+keeps staff sessions and permissions separate from patient access.
 
 > Direct login is intentionally simple. In production, patient IDs must be
 > long, random, non-sequential, kept private, and replaced if disclosed. A
@@ -48,6 +52,21 @@ The demo ID is deliberately obvious and must never be copied into production.
 Never place real patient data, credentials, database dumps, or screenshots in
 Git or application logs.
 
+## Create a reception account
+
+Reception accounts are invite-only. In the Supabase Dashboard, open
+**Authentication → Users**, create a confirmed email/password user, and copy its
+UUID. Then run this once in the Supabase SQL Editor with the real values:
+
+```sql
+insert into dental_portal.staff_profiles
+  (auth_user_id, email, display_name, role, active)
+values
+  ('<auth-user-uuid>', '<work-email>', '<staff-name>', 'receptionist', true);
+```
+
+Do not share reception accounts. Disable `active` when an employee leaves.
+
 ## Authentication and privacy
 
 `POST /api/auth/login` accepts only `fullName` and `patientNumber`. The server
@@ -64,7 +83,8 @@ protected request.
 Fastify is the only browser-facing API. It enforces the configured origin,
 patient ownership, published-record rules, response `no-store` headers, request
 body redaction, and audit events for login and protected record access.
-Supabase's browser SDK and Data API are not used.
+Supabase's browser SDK and Data API are not used. The backend calls Supabase Auth
+only to verify staff email/password credentials.
 
 Appointment requests are intentionally not automatic confirmations. The
 calendar uses active dentists and hides conflicts with scheduled, confirmed,
@@ -117,13 +137,15 @@ curl --fail http://127.0.0.1:3000/api/health
    SESSION_ABSOLUTE_HOURS=8
    LOGIN_MAX_ATTEMPTS=5
    LOGIN_WINDOW_MINUTES=15
+   SUPABASE_URL=https://<project-ref>.supabase.co
+   SUPABASE_PUBLISHABLE_KEY=<publishable-key>
    ```
 
    URL-encode special characters in the database password. The server verifies
    the Supabase certificate and hostname with the bundled CA; never disable
    certificate verification.
-5. Do not add a Supabase publishable key, service-role key, project URL, or
-   management token to the frontend or Coolify runtime.
+5. Store the Supabase URL and publishable key in Coolify for staff login. Never
+   store a service-role key or management token in the frontend or runtime.
 6. Optionally set `VITE_CLINIC_PHONE_TEL` and
    `VITE_CLINIC_PHONE_DISPLAY` as Docker build variables for the public clinic
    contact link.

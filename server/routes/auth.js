@@ -1,5 +1,6 @@
 import {
   SESSION_COOKIE,
+  STAFF_SESSION_COOKIE,
   addHours,
   createSessionToken,
   genericLoginError,
@@ -87,6 +88,11 @@ export default async function authRoutes(
         const failedLimit = await checkLoginRateLimit(request)
         if (failedLimit.isExceeded) return sendRateLimited(reply, failedLimit)
         return reply.code(401).send(genericLoginError)
+      }
+      const staffToken = request.cookies[STAFF_SESSION_COOKIE]
+      if (staffToken) {
+        await store.revokeStaffSession(sha256(staffToken), currentTime)
+        reply.clearCookie(STAFF_SESSION_COOKIE, sessionCookieOptions)
       }
       reply.setCookie(SESSION_COOKIE, token, {
         ...sessionCookieOptions,

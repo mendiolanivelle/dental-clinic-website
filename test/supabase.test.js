@@ -57,6 +57,10 @@ test('the backend role stays least-privilege and the forward migration removes O
     new URL('../migrations/005_hourly_dentist_slots.sql', import.meta.url),
     'utf8',
   )
+  const receptionSql = await readFile(
+    new URL('../migrations/006_reception_portal.sql', import.meta.url),
+    'utf8',
+  )
   const compact = securitySql.replace(/\s+/g, ' ')
 
   assert.doesNotMatch(securitySql, /\bDELETE\b/)
@@ -92,6 +96,13 @@ test('the backend role stays least-privilege and the forward migration removes O
   assert.match(scheduleSql, /requested_end_at = requested_start_at \+ interval '1 hour'/i)
   assert.match(scheduleSql, /INSERT INTO dentists[\s\S]*Dr\. Amara Villanueva[\s\S]*Dr\. Mateo Rivera[\s\S]*Dr\. Celeste Navarro/i)
   assert.match(scheduleSql, /CREATE UNIQUE INDEX IF NOT EXISTS appointment_requests_dentist_slot_active_idx/i)
+  assert.match(receptionSql, /CREATE TABLE IF NOT EXISTS staff_profiles/i)
+  assert.match(receptionSql, /CREATE TABLE IF NOT EXISTS staff_sessions/i)
+  assert.match(receptionSql, /role IN \('receptionist', 'dentist', 'admin'\)/i)
+  assert.match(receptionSql, /GRANT SELECT ON dental_portal\.staff_profiles TO dental_portal_backend/i)
+  assert.match(receptionSql, /GRANT SELECT, INSERT, UPDATE ON dental_portal\.appointments TO dental_portal_backend/i)
+  assert.doesNotMatch(receptionSql, /GRANT[^;]*clinical_records/i)
+  assert.doesNotMatch(receptionSql, /\bDELETE\b/i)
 })
 
 test('production permits Supabase direct/session connections and rejects other hosts or transaction pooling', () => {

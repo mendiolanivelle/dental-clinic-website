@@ -10,6 +10,11 @@ import LoginPage from './pages/LoginPage'
 import ProfilePage from './pages/ProfilePage'
 import RecordsPage from './pages/RecordsPage'
 import TreatmentPlanPage from './pages/TreatmentPlanPage'
+import ReceptionLayout from './components/ReceptionLayout'
+import ReceptionCalendarPage from './pages/ReceptionCalendarPage'
+import ReceptionDashboardPage from './pages/ReceptionDashboardPage'
+import ReceptionPatientsPage from './pages/ReceptionPatientsPage'
+import ReceptionRequestsPage from './pages/ReceptionRequestsPage'
 import { patientFrom } from './portalData'
 
 function AppLoading() {
@@ -49,20 +54,31 @@ function AppUnavailable({ error, onRetry }) {
 }
 
 export default function App() {
-  const [auth, setAuth] = useState({ status: 'loading', patient: null, error: null })
+  const [auth, setAuth] = useState({ status: 'loading', kind: null, user: null, error: null })
   const [sessionExpired, setSessionExpired] = useState(false)
 
   const loadSession = useCallback(async () => {
-    setAuth({ status: 'loading', patient: null, error: null })
+    setAuth({ status: 'loading', kind: null, user: null, error: null })
+    try {
+      const staffResult = await api.getStaffMe({ notifyUnauthorized: false })
+      setAuth({ status: 'authenticated', kind: 'staff', user: staffResult.staff, error: null })
+      setSessionExpired(false)
+      return
+    } catch (error) {
+      if (error.status !== 401) {
+        setAuth({ status: 'error', kind: null, user: null, error })
+        return
+      }
+    }
     try {
       const result = await api.getMe({ notifyUnauthorized: false })
-      setAuth({ status: 'authenticated', patient: patientFrom(result), error: null })
+      setAuth({ status: 'authenticated', kind: 'patient', user: patientFrom(result), error: null })
       setSessionExpired(false)
     } catch (error) {
       if (error.status === 401) {
-        setAuth({ status: 'unauthenticated', patient: null, error: null })
+        setAuth({ status: 'unauthenticated', kind: null, user: null, error: null })
       } else {
-        setAuth({ status: 'error', patient: null, error })
+        setAuth({ status: 'error', kind: null, user: null, error })
       }
     }
   }, [])
@@ -73,7 +89,7 @@ export default function App() {
 
   useEffect(() => {
     const expireSession = () => {
-      setAuth({ status: 'unauthenticated', patient: null, error: null })
+      setAuth({ status: 'unauthenticated', kind: null, user: null, error: null })
       setSessionExpired(true)
     }
     window.addEventListener('portal:unauthorized', expireSession)
@@ -81,13 +97,18 @@ export default function App() {
   }, [])
 
   function handleAuthenticated(patient) {
-    setAuth({ status: 'authenticated', patient: patientFrom(patient), error: null })
+    setAuth({ status: 'authenticated', kind: 'patient', user: patientFrom(patient), error: null })
+    setSessionExpired(false)
+  }
+
+  function handleStaffAuthenticated(staff) {
+    setAuth({ status: 'authenticated', kind: 'staff', user: staff, error: null })
     setSessionExpired(false)
   }
 
   async function handleLogout() {
-    await api.logout()
-    setAuth({ status: 'unauthenticated', patient: null, error: null })
+    await (auth.kind === 'staff' ? api.staffLogout() : api.logout())
+    setAuth({ status: 'unauthenticated', kind: null, user: null, error: null })
     setSessionExpired(false)
   }
 
@@ -95,19 +116,20 @@ export default function App() {
   if (auth.status === 'error') return <AppUnavailable error={auth.error} onRetry={loadSession} />
 
   const authenticated = auth.status === 'authenticated'
+  const home = auth.kind === 'staff' ? '/reception' : '/portal'
 
   return (
     <Routes>
       <Route
         path="/login"
         element={authenticated
-          ? <Navigate replace to="/portal" />
-          : <LoginPage onAuthenticated={handleAuthenticated} />}
+          ? <Navigate replace to={home} />
+          : <LoginPage onAuthenticated={handleAuthenticated} onStaffAuthenticated={handleStaffAuthenticated} />}
       />
       <Route
         path="/portal"
-        element={authenticated
-          ? <PortalLayout patient={auth.patient} onLogout={handleLogout} />
+        element={authenticated && auth.kind === 'patient'
+          ? <PortalLayout patient={auth.user} onLogout={handleLogout} />
           : <Navigate replace state={{ sessionExpired }} to="/login" />}
       >
         <Route index element={<DashboardPage />} />
@@ -116,7 +138,18 @@ export default function App() {
         <Route path="treatment-plan" element={<TreatmentPlanPage />} />
         <Route path="profile" element={<ProfilePage />} />
       </Route>
-      <Route path="*" element={<Navigate replace to={authenticated ? '/portal' : '/login'} />} />
+      <Route
+        path="/reception"
+        element={authenticated && auth.kind === 'staff'
+          ? <ReceptionLayout staff={auth.user} onLogout={handleLogout} />
+          : <Navigate replace state={{ sessionExpired }} to="/login" />}
+      >
+        <Route index element={<ReceptionDashboardPage />} />
+        <Route path="requests" element={<ReceptionRequestsPage />} />
+        <Route path="calendar" element={<ReceptionCalendarPage />} />
+        <Route path="patients" element={<ReceptionPatientsPage />} />
+      </Route>
+      <Route path="*" element={<Navigate replace to={authenticated ? home : '/login'} />} />
     </Routes>
   )
 }

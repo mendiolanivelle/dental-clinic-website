@@ -57,6 +57,39 @@ const availabilitySlotFromRow = (row) => ({
   available: row.available,
 })
 
+const staffFromRow = (row) => ({
+  id: row.id,
+  displayName: row.display_name,
+  email: row.email,
+  role: row.role,
+})
+
+const receptionRequestFromRow = (row) => ({
+  ...appointmentRequestFromRow(row),
+  patient: {
+    id: row.patient_id,
+    displayName: row.patient_name,
+    patientNumber: row.patient_number,
+    phone: row.phone_e164,
+  },
+  clinicNote: row.clinic_note,
+})
+
+const receptionAppointmentFromRow = (row) => ({
+  id: row.id,
+  typeName: row.type_name,
+  startsAt: row.starts_at,
+  endsAt: row.ends_at,
+  status: row.status,
+  dentistName: row.dentist_name,
+  patient: {
+    id: row.patient_id,
+    displayName: row.patient_name,
+    patientNumber: row.patient_number,
+    phone: row.phone_e164,
+  },
+})
+
 const appointmentSelect = `
   SELECT a.id, t.name AS type_name, a.starts_at, a.ends_at, a.status,
          d.display_name AS dentist_name, a.patient_instructions
@@ -309,6 +342,76 @@ export function createStore(db) {
       )
     },
 
+    async createStaffSessionForLogin({
+      authUserId,
+      sessionId,
+      tokenDigest,
+      now,
+      absoluteExpiresAt,
+      audit,
+    }) {
+      return db.transaction(async (client) => {
+        const result = await client.query(
+          `SELECT id, display_name, email, role
+           FROM staff_profiles
+           WHERE auth_user_id = $1 AND active = true
+           LIMIT 1`,
+          [authUserId],
+        )
+        const row = result.rows[0]
+        if (row) {
+          await client.query(
+            `INSERT INTO staff_sessions (
+               id, staff_id, token_digest, created_at, last_seen_at,
+               absolute_expires_at
+             ) VALUES ($1, $2, $3, $4, $4, $5)`,
+            [sessionId, row.id, tokenDigest, now, absoluteExpiresAt],
+          )
+        }
+        await client.query(
+          `INSERT INTO audit_events (
+             actor_type, actor_id, action, occurred_at, request_id, ip_digest, user_agent
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [
+            row ? 'staff' : 'anonymous',
+            row?.id || null,
+            row ? 'staff.login_succeeded' : 'staff.login_failed',
+            now,
+            audit.requestId,
+            audit.ipDigest,
+            audit.userAgent?.slice(0, 512) || null,
+          ],
+        )
+        return row ? staffFromRow(row) : null
+      })
+    },
+
+    async authenticateStaffSession(tokenDigest, now, idleCutoff) {
+      const result = await db.query(
+        `UPDATE staff_sessions s
+         SET last_seen_at = $2
+         FROM staff_profiles p
+         WHERE s.token_digest = $1
+           AND s.staff_id = p.id
+           AND s.revoked_at IS NULL
+           AND s.absolute_expires_at > $2
+           AND s.last_seen_at >= $3
+           AND p.active = true
+         RETURNING p.id, p.display_name, p.email, p.role`,
+        [tokenDigest, now, idleCutoff],
+      )
+      return result.rowCount ? staffFromRow(result.rows[0]) : null
+    },
+
+    async revokeStaffSession(tokenDigest, now) {
+      await db.query(
+        `UPDATE staff_sessions
+         SET revoked_at = $2
+         WHERE token_digest = $1 AND revoked_at IS NULL`,
+        [tokenDigest, now],
+      )
+    },
+
     addAudit,
     listServices,
     listAppointmentRequests,
@@ -316,6 +419,155 @@ export function createStore(db) {
     listAppointments,
     listRecords,
     getTreatmentPlan,
+
+    async getReceptionDashboard(date) {
+      const [pending, calendar] = await Promise.all([
+        db.query(
+          `SELECT count(*)::integer AS count
+           FROM appointment_requests
+           WHERE status = 'requested'`,
+        ),
+        this.listReceptionCalendar(date),
+      ])
+      return {
+        pendingRequests: pending.rows[0].count,
+        todayAppointments: calendar.appointments,
+        todayRequests: calendar.appointmentRequests,
+      }
+    },
+
+    async listReceptionRequests() {
+      const result = await db.query(
+        `SELECT r.id, r.appointment_type_id, t.name AS service_name,
+                r.dentist_id, d.display_name AS dentist_name,
+                r.requested_start_at, r.requested_end_at,
+                r.preferred_date, r.time_preference, r.patient_note,
+                r.status, r.clinic_note, r.created_at,
+                p.display_name AS patient_name, p.patient_number,
+                p.phone_e164, p.id AS patient_id
+         FROM appointment_requests r
+         JOIN appointment_types t ON t.id = r.appointment_type_id
+         LEFT JOIN dentists d ON d.id = r.dentist_id
+         JOIN patients p ON p.id = r.patient_id
+         ORDER BY (r.status = 'requested') DESC, r.created_at DESC
+         LIMIT 100`,
+      )
+      return result.rows.map(receptionRequestFromRow)
+    },
+
+    async listReceptionCalendar(date) {
+      const [appointments, requests] = await Promise.all([
+        db.query(
+          `SELECT a.id, t.name AS type_name, a.starts_at, a.ends_at, a.status,
+                  d.display_name AS dentist_name, p.id AS patient_id,
+                  p.display_name AS patient_name, p.patient_number, p.phone_e164
+           FROM appointments a
+           JOIN appointment_types t ON t.id = a.appointment_type_id
+           JOIN dentists d ON d.id = a.dentist_id
+           JOIN patients p ON p.id = a.patient_id
+           WHERE (a.starts_at AT TIME ZONE 'Asia/Manila')::date = $1::date
+             AND a.status IN ('scheduled', 'confirmed')
+           ORDER BY a.starts_at ASC, d.display_name ASC`,
+          [date],
+        ),
+        db.query(
+          `SELECT r.id, r.appointment_type_id, t.name AS service_name,
+                  r.dentist_id, d.display_name AS dentist_name,
+                  r.requested_start_at, r.requested_end_at,
+                  r.preferred_date, r.time_preference, r.patient_note,
+                  r.status, r.clinic_note, r.created_at,
+                  p.display_name AS patient_name, p.patient_number,
+                  p.phone_e164, p.id AS patient_id
+           FROM appointment_requests r
+           JOIN appointment_types t ON t.id = r.appointment_type_id
+           LEFT JOIN dentists d ON d.id = r.dentist_id
+           JOIN patients p ON p.id = r.patient_id
+           WHERE r.preferred_date = $1::date
+             AND r.status = 'requested'
+           ORDER BY r.requested_start_at ASC, r.created_at ASC`,
+          [date],
+        ),
+      ])
+      return {
+        appointments: appointments.rows.map(receptionAppointmentFromRow),
+        appointmentRequests: requests.rows.map(receptionRequestFromRow),
+      }
+    },
+
+    async updateReceptionRequest({ id, action, clinicNote, now }) {
+      return db.transaction(async (client) => {
+        const selected = await client.query(
+          `SELECT r.id, r.patient_id, r.dentist_id, r.appointment_type_id,
+                  r.requested_start_at, r.requested_end_at
+           FROM appointment_requests r
+           WHERE r.id = $1 AND r.status = 'requested'
+           FOR UPDATE`,
+          [id],
+        )
+        const request = selected.rows[0]
+        if (!request) return { outcome: 'not_found' }
+
+        if (action === 'confirm') {
+          const inserted = await client.query(
+            `INSERT INTO appointments (
+               patient_id, dentist_id, appointment_type_id, starts_at, ends_at,
+               status, patient_instructions, created_at, updated_at
+             )
+             SELECT $1, $2, $3, $4, $5, 'confirmed', $6, $7, $7
+             WHERE $4 > $7
+               AND NOT EXISTS (
+                 SELECT 1 FROM appointments a
+                 WHERE a.dentist_id = $2
+                   AND a.status IN ('scheduled', 'confirmed')
+                   AND a.starts_at < $5 AND a.ends_at > $4
+               )
+             ON CONFLICT (dentist_id, starts_at)
+               WHERE status IN ('scheduled', 'confirmed')
+               DO NOTHING
+             RETURNING id`,
+            [
+              request.patient_id,
+              request.dentist_id,
+              request.appointment_type_id,
+              request.requested_start_at,
+              request.requested_end_at,
+              clinicNote,
+              now,
+            ],
+          )
+          if (!inserted.rowCount) return { outcome: 'slot_unavailable' }
+        }
+
+        await client.query(
+          `UPDATE appointment_requests
+           SET status = $2, clinic_note = $3, updated_at = $4
+           WHERE id = $1`,
+          [id, action === 'confirm' ? 'confirmed' : 'declined', clinicNote, now],
+        )
+        return { outcome: 'updated' }
+      })
+    },
+
+    async searchReceptionPatients(query) {
+      const result = await db.query(
+        `SELECT id, display_name, patient_number, phone_e164
+         FROM patients
+         WHERE portal_enabled = true
+           AND (
+             position(lower($1) in lower(display_name)) > 0
+             OR position(upper($1) in patient_number) > 0
+           )
+         ORDER BY display_name ASC
+         LIMIT 20`,
+        [query],
+      )
+      return result.rows.map((row) => ({
+        id: row.id,
+        displayName: row.display_name,
+        patientNumber: row.patient_number,
+        phone: row.phone_e164,
+      }))
+    },
 
     async createAppointmentRequest({
       patientId,

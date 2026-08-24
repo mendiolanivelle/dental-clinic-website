@@ -18,6 +18,8 @@ export const portalTableNames = [
   'clinical_records',
   'login_challenges',
   'portal_sessions',
+  'staff_profiles',
+  'staff_sessions',
   'audit_events',
 ]
 
