@@ -20,6 +20,7 @@ import {
   listFrom,
   planFrom,
   recordView,
+  serviceView,
   treatmentPlanView,
 } from '../portalData'
 
@@ -72,6 +73,7 @@ export default function DashboardPage() {
         ? [dashboard.recent_record]
         : []
   const recentRecord = recentRecords[0] ? recordView(recentRecords[0]) : null
+  const services = listFrom({ services: dashboard?.services }, 'services').map(serviceView)
   const name = getName(patient).split(/\s+/)[0]
 
   return (
@@ -115,6 +117,51 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
+      </section>
+
+      <section className="mb-8 rounded-3xl bg-white p-5 sm:p-6" aria-labelledby="services-heading">
+        <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p className="text-xs font-extrabold uppercase tracking-[.18em] text-brand/60">Plan your next visit</p>
+            <h2 id="services-heading" className="mt-1 text-xl font-extrabold">Choose a dental service</h2>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-ink/50">
+              Select the care you need and request a convenient appointment time. The clinic will confirm availability with you.
+            </p>
+          </div>
+          <Link className="inline-flex shrink-0 items-center gap-1 text-xs font-extrabold text-brand" to="/portal/appointments">
+            View booking requests <ChevronRight size={15} />
+          </Link>
+        </div>
+
+        {services.length ? (
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {services.map((service) => (
+              <article className="flex flex-col rounded-2xl border border-ink/6 bg-cream/45 p-4" key={service.id}>
+                <div className="grid h-10 w-10 place-items-center rounded-xl bg-mint text-brand">
+                  <Sparkles size={18} />
+                </div>
+                <h3 className="mt-4 text-sm font-extrabold">{service.name}</h3>
+                <p className="mt-2 line-clamp-2 text-xs leading-5 text-ink/50">{service.description}</p>
+                {service.durationMinutes && (
+                  <p className="mt-3 inline-flex items-center gap-1.5 text-[11px] font-bold text-brand/70">
+                    <Clock3 size={13} />
+                    About {service.durationMinutes} minutes
+                  </p>
+                )}
+                <Link
+                  className="mt-4 inline-flex items-center gap-1.5 text-xs font-extrabold text-brand hover:text-brand-dark"
+                  to={`/portal/appointments?service=${encodeURIComponent(service.id)}`}
+                >
+                  Book this service <ArrowRight size={14} />
+                </Link>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="rounded-2xl bg-cream/60 p-5 text-center text-sm text-ink/50">
+            The clinic service catalog is being prepared. Please call us if you need help arranging care.
+          </p>
+        )}
       </section>
 
       <div className="grid gap-7 xl:grid-cols-[1.35fr_.8fr]">

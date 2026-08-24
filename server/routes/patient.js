@@ -14,6 +14,18 @@ const idParams = {
   properties: { id: { type: 'string', format: 'uuid' } },
 }
 
+const appointmentRequestBody = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['appointmentTypeId', 'preferredDate', 'timePreference'],
+  properties: {
+    appointmentTypeId: { type: 'string', format: 'uuid' },
+    preferredDate: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+    timePreference: { type: 'string', enum: ['any', 'morning', 'afternoon'] },
+    patientNote: { type: 'string', maxLength: 1000 },
+  },
+}
+
 export default async function patientRoutes(app, { store, config, now }) {
   const audited = async (request, action, objectType = null, objectId = null) => {
     await store.addAudit({
@@ -44,6 +56,60 @@ export default async function patientRoutes(app, { store, config, now }) {
     await audited(request, 'portal.dashboard_viewed')
     return dashboard
   })
+
+  app.get('/api/me/services', { preHandler: app.authenticate }, async (request) => {
+    const services = await store.listServices()
+    await audited(request, 'portal.services_listed')
+    return { services }
+  })
+
+  app.get('/api/me/appointment-requests', { preHandler: app.authenticate }, async (request) => {
+    const appointmentRequests = await store.listAppointmentRequests(request.patient.id)
+    await audited(request, 'portal.appointment_requests_listed')
+    return { appointmentRequests }
+  })
+
+  app.post(
+    '/api/me/appointment-requests',
+    { preHandler: app.authenticate, schema: { body: appointmentRequestBody } },
+    async (request, reply) => {
+      const { appointmentTypeId, preferredDate, timePreference, patientNote = '' } = request.body
+      const today = now().toISOString().slice(0, 10)
+      if (preferredDate < today) {
+        return reply.code(400).send({
+          error: {
+            code: 'INVALID_DATE',
+            message: 'Please choose today or a future date.',
+          },
+        })
+      }
+
+      const appointmentRequest = await store.createAppointmentRequest({
+        patientId: request.patient.id,
+        appointmentTypeId,
+        preferredDate,
+        timePreference,
+        patientNote: patientNote.trim() || null,
+        now: now(),
+      })
+      if (!appointmentRequest) {
+        return reply.code(400).send({
+          error: {
+            code: 'INVALID_SERVICE',
+            message: 'Please choose a service from the clinic catalog.',
+          },
+        })
+      }
+
+      await audited(
+        request,
+        'portal.appointment_request_created',
+        'appointment_request',
+        appointmentRequest.id,
+      )
+      return reply.code(201).send({ appointmentRequest })
+    },
+  )
 
   app.get(
     '/api/me/appointments',

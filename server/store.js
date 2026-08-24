@@ -26,6 +26,25 @@ const treatmentPlanFromRow = (row) => ({
   nextRecommendedOn: row.next_recommended_on,
 })
 
+const serviceFromRow = (row) => ({
+  id: row.id,
+  name: row.name,
+  durationMinutes: row.default_duration_minutes,
+  patientDescription: row.patient_description,
+})
+
+const appointmentRequestFromRow = (row) => ({
+  id: row.id,
+  serviceId: row.appointment_type_id,
+  serviceName: row.service_name,
+  preferredDate: row.preferred_date,
+  timePreference: row.time_preference,
+  patientNote: row.patient_note,
+  status: row.status,
+  clinicNote: row.status === 'confirmed' || row.status === 'declined' ? row.clinic_note : null,
+  createdAt: row.created_at,
+})
+
 const appointmentSelect = `
   SELECT a.id, t.name AS type_name, a.starts_at, a.ends_at, a.status,
          d.display_name AS dentist_name, a.patient_instructions
@@ -45,6 +64,14 @@ const treatmentPlanSelect = `
   SELECT id, title, patient_summary, status, started_on,
          recommended_interval_days, next_recommended_on
   FROM treatment_plans
+`
+
+const appointmentRequestSelect = `
+  SELECT r.id, r.appointment_type_id, t.name AS service_name,
+         r.preferred_date, r.time_preference, r.patient_note,
+         r.status, r.clinic_note, r.created_at
+  FROM appointment_requests r
+  JOIN appointment_types t ON t.id = r.appointment_type_id
 `
 
 export function createStore(db) {
@@ -112,6 +139,26 @@ export function createStore(db) {
       [patientId],
     )
     return result.rowCount ? treatmentPlanFromRow(result.rows[0]) : null
+  }
+
+  const listServices = async () => {
+    const result = await db.query(
+      `SELECT id, name, default_duration_minutes, patient_description
+       FROM appointment_types
+       ORDER BY name ASC`,
+    )
+    return result.rows.map(serviceFromRow)
+  }
+
+  const listAppointmentRequests = async (patientId) => {
+    const result = await db.query(
+      `${appointmentRequestSelect}
+       WHERE r.patient_id = $1
+       ORDER BY r.created_at DESC
+       LIMIT 20`,
+      [patientId],
+    )
+    return result.rows.map(appointmentRequestFromRow)
   }
 
   return {
@@ -208,9 +255,39 @@ export function createStore(db) {
     },
 
     addAudit,
+    listServices,
+    listAppointmentRequests,
     listAppointments,
     listRecords,
     getTreatmentPlan,
+
+    async createAppointmentRequest({
+      patientId,
+      appointmentTypeId,
+      preferredDate,
+      timePreference,
+      patientNote,
+      now,
+    }) {
+      const result = await db.query(
+        `WITH inserted AS (
+           INSERT INTO appointment_requests (
+             patient_id, appointment_type_id, preferred_date,
+             time_preference, patient_note, status, created_at, updated_at
+           )
+           SELECT $1, t.id, $3, $4, $5, 'requested', $6, $6
+           FROM appointment_types t
+           WHERE t.id = $2
+           RETURNING id, appointment_type_id, preferred_date, time_preference,
+                     patient_note, status, clinic_note, created_at
+         )
+         SELECT inserted.*, t.name AS service_name
+         FROM inserted
+         JOIN appointment_types t ON t.id = inserted.appointment_type_id`,
+        [patientId, appointmentTypeId, preferredDate, timePreference, patientNote, now],
+      )
+      return result.rowCount ? appointmentRequestFromRow(result.rows[0]) : null
+    },
 
     async getAppointment(patientId, appointmentId) {
       const result = await db.query(
@@ -233,7 +310,7 @@ export function createStore(db) {
     },
 
     async getDashboard(patientId, now) {
-      const [appointmentResult, plan, recordResult] = await Promise.all([
+      const [appointmentResult, plan, recordResult, services] = await Promise.all([
         db.query(
           `${appointmentSelect}
            WHERE a.patient_id = $1
@@ -252,6 +329,7 @@ export function createStore(db) {
            LIMIT 1`,
           [patientId],
         ),
+        listServices(),
       ])
       return {
         nextAppointment: appointmentResult.rowCount
@@ -259,6 +337,7 @@ export function createStore(db) {
           : null,
         treatmentPlan: plan,
         recentRecord: recordResult.rowCount ? recordFromRow(recordResult.rows[0]) : null,
+        services,
       }
     },
   }

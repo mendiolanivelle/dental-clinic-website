@@ -8,7 +8,7 @@ Application: SmileCare Dental Patient Portal
 
 ## 1. Objective
 
-Provide a simple, read-only patient portal where a patient enters:
+Provide a simple patient portal where a patient enters:
 
 1. the full name stored by the clinic; and
 2. the clinic-issued patient ID.
@@ -22,6 +22,11 @@ Patients can view:
 - upcoming and past dental appointments;
 - published clinical record summaries; and
 - their active published treatment plan.
+
+Patients can also browse the clinic's dental service catalog from the overview
+and submit an appointment request with a selected service, preferred date, and
+time preference. A request is not an automatic confirmation; clinic staff must
+review and confirm the actual dentist and time slot.
 
 ## 2. Security boundary
 
@@ -197,8 +202,11 @@ whether an account exists.
 POST /api/auth/logout
 GET  /api/me
 GET  /api/me/dashboard
+GET  /api/me/services
 GET  /api/me/appointments?scope=upcoming|past
 GET  /api/me/appointments/:id
+GET  /api/me/appointment-requests
+POST /api/me/appointment-requests
 GET  /api/me/records
 GET  /api/me/records/:id
 GET  /api/me/treatment-plan
@@ -280,6 +288,12 @@ clears the cookie. Invalid or expired sessions also clear the cookie.
 All appointment, record, and treatment-plan queries include the authenticated
 `patient_id`.
 
+Appointment-request list and create operations derive `patient_id` from the
+authenticated session. The create operation accepts only an approved
+`appointmentTypeId`, a future `preferredDate`, `timePreference` (`any`,
+`morning`, or `afternoon`), and an optional patient note. It creates status
+`requested`; it must never create a confirmed appointment directly.
+
 Never accept `patientId` in a request body, path, or query string as an
 authorization selector. A valid UUID belonging to another patient must return
 the same `404` as an unknown UUID.
@@ -308,6 +322,7 @@ Portal tables live in the private `dental_portal` schema:
 - `dentists`
 - `appointment_types`
 - `appointments`
+- `appointment_requests`
 - `treatment_plans`
 - `clinical_records`
 - `portal_sessions`
@@ -431,6 +446,10 @@ must verify the Supabase CA and hostname. Never set
 - Unpublished records and plans are never returned.
 - Browser-supplied patient selectors are rejected.
 - Authentication and patient endpoints include `Cache-Control: no-store`.
+- Services are visible only through authenticated patient endpoints, and a
+  patient can list or create only their own appointment requests.
+- Booking requests preserve the selected service, preferred timing, status,
+  and patient note; they do not silently create a scheduled appointment.
 - State-changing requests without the configured origin return `403`.
 - Logs contain no request body, cookie, token, full name, patient ID, or
   clinical content.
@@ -456,12 +475,14 @@ must verify the Supabase CA and hostname. Never set
 4. Preserve opaque-session, origin, audit, and patient-scoping code.
 5. Add an ordered migration only if the stored schema must change.
 6. Update frontend login behavior and remove verification navigation.
-7. Update tests before changing deployment configuration.
-8. Run `npm run verify`.
-9. Apply Supabase migrations and verify them with a second no-op run.
-10. Confirm Coolify uses only the runtime variables in section 10.
-11. Deploy and test the production domain.
-12. Commit and push the verified result to `main`.
+7. Add the authenticated service catalog and appointment-request flow; keep
+   requests pending until clinic staff confirms them.
+8. Update tests before changing deployment configuration.
+9. Run `npm run verify`.
+10. Apply Supabase migrations and verify them with a second no-op run.
+11. Confirm Coolify uses only the runtime variables in section 10.
+12. Deploy and test the production domain.
+13. Commit and push the verified result to `main`.
 
 ## 15. Definition of done
 
@@ -473,6 +494,8 @@ The work is complete only when:
 - invalid credentials cannot create a session or reveal account existence;
 - strict rate limiting, opaque sessions, expiry, logout, audit, patient
   scoping, and published-record filtering pass automated tests;
+- services appear above upcoming appointments and patients can submit
+  authenticated appointment requests tied to a selected service;
 - Supabase remains private and least privilege over verified TLS;
 - Coolify starts successfully without delivery-provider variables;
 - production health and deep-link checks pass; and

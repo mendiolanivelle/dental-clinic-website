@@ -25,6 +25,21 @@ class MemoryStore {
       enabled: true,
     }
     this.otherPatientId = '10000000-0000-4000-8000-000000000002'
+    this.services = [
+      {
+        id: '60000000-0000-4000-8000-000000000001',
+        name: 'Cleaning',
+        durationMinutes: 45,
+        patientDescription: 'Routine dental cleaning.',
+      },
+      {
+        id: '60000000-0000-4000-8000-000000000002',
+        name: 'Brace Adjustment',
+        durationMinutes: 30,
+        patientDescription: 'Scheduled orthodontic adjustment.',
+      },
+    ]
+    this.appointmentRequests = []
     this.appointments = [
       {
         patientId: this.patient.id,
@@ -149,7 +164,42 @@ class MemoryStore {
   }
 
   async getDashboard() {
-    return { nextAppointment: null, treatmentPlan: null, recentRecord: null }
+    return {
+      nextAppointment: null,
+      treatmentPlan: null,
+      recentRecord: null,
+      services: this.services,
+    }
+  }
+
+  async listServices() {
+    return this.services
+  }
+
+  async listAppointmentRequests(patientId) {
+    return this.appointmentRequests
+      .filter((request) => request.patientId === patientId)
+      .map(({ patientId: _patientId, ...request }) => request)
+  }
+
+  async createAppointmentRequest(input) {
+    const service = this.services.find((item) => item.id === input.appointmentTypeId)
+    if (!service) return null
+    const request = {
+      patientId: input.patientId,
+      id: '70000000-0000-4000-8000-000000000001',
+      serviceId: service.id,
+      serviceName: service.name,
+      preferredDate: input.preferredDate,
+      timePreference: input.timePreference,
+      patientNote: input.patientNote,
+      status: 'requested',
+      clinicNote: null,
+      createdAt: input.now,
+    }
+    this.appointmentRequests.unshift(request)
+    const { patientId: _patientId, ...result } = request
+    return result
   }
 
   async listAppointments(patientId) {
@@ -412,6 +462,44 @@ test('patient endpoints require authentication and enforce patient ownership and
 
   const loggedIn = await loginKnownPatient()
   const cookie = loggedIn.headers['set-cookie'].split(';')[0]
+
+  const services = await app.inject({
+    url: '/api/me/services',
+    headers: { cookie },
+  })
+  assert.equal(services.statusCode, 200)
+  assert.deepEqual(services.json().services.map(({ name }) => name), ['Cleaning', 'Brace Adjustment'])
+
+  const createdRequest = await app.inject({
+    method: 'POST',
+    url: '/api/me/appointment-requests',
+    headers: { origin: config.publicOrigin, cookie },
+    payload: {
+      appointmentTypeId: '60000000-0000-4000-8000-000000000001',
+      preferredDate: '2026-08-01',
+      timePreference: 'morning',
+      patientNote: 'Sensitive tooth on the left side.',
+    },
+  })
+  assert.equal(createdRequest.statusCode, 201)
+  assert.deepEqual(createdRequest.json().appointmentRequest, {
+    id: '70000000-0000-4000-8000-000000000001',
+    serviceId: '60000000-0000-4000-8000-000000000001',
+    serviceName: 'Cleaning',
+    preferredDate: '2026-08-01',
+    timePreference: 'morning',
+    patientNote: 'Sensitive tooth on the left side.',
+    status: 'requested',
+    clinicNote: null,
+    createdAt: currentTime.toISOString(),
+  })
+
+  const requestList = await app.inject({
+    url: '/api/me/appointment-requests',
+    headers: { cookie },
+  })
+  assert.equal(requestList.statusCode, 200)
+  assert.equal(requestList.json().appointmentRequests.length, 1)
 
   const appointments = await app.inject({
     url: '/api/me/appointments?scope=upcoming',

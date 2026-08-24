@@ -32,6 +32,31 @@ export function appointmentView(appointment = {}) {
   }
 }
 
+export function serviceView(service = {}) {
+  return {
+    ...service,
+    id: service.id,
+    name: service.name || service.typeName || service.type_name || 'Dental service',
+    durationMinutes: service.durationMinutes ?? service.default_duration_minutes ?? null,
+    description: service.patientDescription || service.patient_description || service.description || 'A personalized visit with your dental care team.',
+  }
+}
+
+export function appointmentRequestView(request = {}) {
+  return {
+    ...request,
+    id: request.id,
+    serviceId: request.serviceId || request.appointmentTypeId || request.appointment_type_id,
+    serviceName: request.serviceName || request.service_name || 'Dental service',
+    preferredDate: request.preferredDate || request.preferred_date,
+    timePreference: request.timePreference || request.time_preference || 'any',
+    patientNote: request.patientNote || request.patient_note || '',
+    clinicNote: request.clinicNote || request.clinic_note || '',
+    status: request.status || 'requested',
+    createdAt: request.createdAt || request.created_at,
+  }
+}
+
 export function recordView(record = {}) {
   const dentist = record.dentist
 

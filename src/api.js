@@ -63,6 +63,12 @@ export const api = {
   }),
   getMe: ({ notifyUnauthorized = true } = {}) => request('/api/me', { notifyUnauthorized }),
   getDashboard: () => request('/api/me/dashboard'),
+  getServices: () => request('/api/me/services'),
+  getAppointmentRequests: () => request('/api/me/appointment-requests'),
+  createAppointmentRequest: (details) => request('/api/me/appointment-requests', {
+    method: 'POST',
+    body: json(details),
+  }),
   getAppointments: (scope) => request(`/api/me/appointments?scope=${encodeURIComponent(scope)}`),
   getRecords: () => request('/api/me/records'),
   getTreatmentPlan: () => request('/api/me/treatment-plan'),

@@ -1,9 +1,10 @@
 # SmileCare Dental Patient Portal
 
-A read-only patient portal built with React, Vite, Tailwind CSS, Fastify, and
+A patient portal built with React, Vite, Tailwind CSS, Fastify, and
 Supabase-hosted PostgreSQL. Patients sign in with the full name recorded by the
-clinic and their clinic-issued patient ID. There is no registration, password,
-SMS, or one-time-code step.
+clinic and their clinic-issued patient ID. They can browse the clinic service
+catalog and submit appointment requests with a preferred date and time. There
+is no registration, password, SMS, or one-time-code step.
 
 > Direct login is intentionally simple. In production, patient IDs must be
 > long, random, non-sequential, kept private, and replaced if disclosed. A
@@ -64,6 +65,10 @@ Fastify is the only browser-facing API. It enforces the configured origin,
 patient ownership, published-record rules, response `no-store` headers, request
 body redaction, and audit events for login and protected record access.
 Supabase's browser SDK and Data API are not used.
+
+Appointment requests are intentionally not automatic confirmations. A patient
+selects a service and preferred timing, then the clinic reviews the request and
+confirms the available dentist and appointment slot.
 
 ## Verification
 
@@ -136,6 +141,8 @@ Do not enable real patient records until:
   distributed privately;
 - rate-limit, generic-error, session, logout, expiry, origin, deep-link,
   no-store, and cross-patient authorization tests pass;
+- service catalog and appointment-request migrations are applied before the
+  patient booking flow is enabled;
 - only approved patient-safe fields and published summaries are exposed;
 - Supabase API roles cannot access portal tables, RLS is enabled as defense in
   depth, and the runtime role is least privilege over verified TLS;

@@ -49,6 +49,10 @@ test('the backend role stays least-privilege and the forward migration removes O
     new URL('../migrations/003_remove_sms_otp.sql', import.meta.url),
     'utf8',
   )
+  const bookingSql = await readFile(
+    new URL('../migrations/004_appointment_requests.sql', import.meta.url),
+    'utf8',
+  )
   const compact = securitySql.replace(/\s+/g, ' ')
 
   assert.doesNotMatch(securitySql, /\bDELETE\b/)
@@ -74,6 +78,12 @@ test('the backend role stays least-privilege and the forward migration removes O
   assert.doesNotMatch(removalSql, /\bCASCADE\b/i)
   assert.doesNotMatch(removalSql, /\bpublic\./i)
   assert.doesNotMatch(removalSql, /DROP TABLE[^;]*portal_sessions/i)
+  assert.match(
+    bookingSql,
+    /CREATE TABLE IF NOT EXISTS appointment_requests[\s\S]*status text NOT NULL DEFAULT 'requested'/i,
+  )
+  assert.match(bookingSql, /GRANT SELECT, INSERT ON dental_portal\.appointment_requests TO dental_portal_backend;/i)
+  assert.match(bookingSql, /ENABLE ROW LEVEL SECURITY[\s\S]*appointment_requests/i)
 })
 
 test('production permits Supabase direct/session connections and rejects other hosts or transaction pooling', () => {
@@ -154,10 +164,10 @@ test('Management API migrations are ordered, checksummed, and never place the ac
   assert.ok(
     migrationQueries.some((query) => /ENABLE ROW LEVEL SECURITY/.test(query)),
   )
-  assert.match(
-    migrationQueries.at(-1),
-    /DROP TABLE IF EXISTS dental_portal\.login_challenges/,
-  )
+  const removalQuery = migrationQueries.find((query) => query.includes('DROP TABLE IF EXISTS dental_portal.login_challenges'))
+  const bookingQuery = migrationQueries.find((query) => query.includes('CREATE TABLE IF NOT EXISTS appointment_requests'))
+  assert.ok(removalQuery)
+  assert.ok(bookingQuery)
   for (const call of calls) {
     assert.equal(call.options.body.includes(token), false)
   }

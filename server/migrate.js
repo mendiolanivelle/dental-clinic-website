@@ -13,6 +13,7 @@ export const portalTableNames = [
   'dentists',
   'appointment_types',
   'appointments',
+  'appointment_requests',
   'treatment_plans',
   'clinical_records',
   'login_challenges',

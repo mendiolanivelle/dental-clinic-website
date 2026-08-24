@@ -9,11 +9,12 @@ import {
   Phone,
   Stethoscope,
 } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
 import { api } from '../api'
 import ClinicPhoneLink from '../components/ClinicPhoneLink'
 import { EmptyState, ErrorState, LoadingState } from '../components/PageState'
 import { formatDate, formatTime, titleCase } from '../format'
-import { appointmentView, listFrom } from '../portalData'
+import { appointmentRequestView, appointmentView, listFrom, serviceView } from '../portalData'
 
 const statusColors = {
   scheduled: 'bg-[#e9e7f8] text-[#66569f]',
@@ -21,6 +22,20 @@ const statusColors = {
   completed: 'bg-[#e6f0fa] text-[#376b95]',
   cancelled: 'bg-[#fff0e7] text-[#9a4e22]',
   no_show: 'bg-ink/8 text-ink/55',
+}
+
+const requestStatusColors = {
+  requested: 'bg-mint text-brand',
+  confirmed: 'bg-[#e6f0fa] text-[#376b95]',
+  declined: 'bg-[#fff0e7] text-[#9a4e22]',
+  cancelled: 'bg-ink/8 text-ink/55',
+  completed: 'bg-[#e9e7f8] text-[#66569f]',
+}
+
+const timePreferenceLabels = {
+  any: 'Any time',
+  morning: 'Morning',
+  afternoon: 'Afternoon',
 }
 
 function appointmentsFrom(payload, scope) {
@@ -88,9 +103,169 @@ function AppointmentCard({ value, upcoming }) {
   )
 }
 
+function BookingRequestForm({ services, selectedServiceId, onServiceChange, onCreated }) {
+  const [preferredDate, setPreferredDate] = useState('')
+  const [timePreference, setTimePreference] = useState('any')
+  const [patientNote, setPatientNote] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
+  const today = new Date().toISOString().slice(0, 10)
+
+  async function handleSubmit(event) {
+    event.preventDefault()
+    setError('')
+    setSuccess('')
+    if (!selectedServiceId || !preferredDate) {
+      setError('Choose a service and preferred date to continue.')
+      return
+    }
+
+    setSubmitting(true)
+    try {
+      const result = await api.createAppointmentRequest({
+        appointmentTypeId: selectedServiceId,
+        preferredDate,
+        timePreference,
+        patientNote,
+      })
+      const appointmentRequest = appointmentRequestView(result?.appointmentRequest || result)
+      onCreated(appointmentRequest)
+      setPreferredDate('')
+      setTimePreference('any')
+      setPatientNote('')
+      setSuccess('Your appointment request was sent. The clinic will confirm the available date and time.')
+    } catch (requestError) {
+      setError(requestError.message || 'We could not send your appointment request. Please try again.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <section className="mb-8 rounded-3xl bg-white p-5 soft-shadow sm:p-6" aria-labelledby="booking-heading">
+      <div className="mb-5">
+        <p className="text-xs font-extrabold uppercase tracking-[.18em] text-brand/60">Request a visit</p>
+        <h2 id="booking-heading" className="mt-1 text-xl font-extrabold">Book an appointment</h2>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-ink/50">
+          Tell us what care you need and when you would prefer to come in. Your request is not confirmed until the clinic reviews it.
+        </p>
+      </div>
+
+      {!services.length ? (
+        <p className="rounded-2xl bg-cream/60 p-5 text-center text-sm text-ink/50">
+          Services are temporarily unavailable. Please call the clinic to arrange care.
+        </p>
+      ) : (
+        <form className="space-y-4" onSubmit={handleSubmit}>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="mb-2 block text-sm font-extrabold" htmlFor="appointment-service">Service</label>
+              <select
+                id="appointment-service"
+                className="w-full rounded-2xl border border-ink/10 bg-cream/45 px-4 py-3 text-sm font-semibold text-ink outline-none transition focus:border-brand/40 focus:bg-white focus:ring-4 focus:ring-brand/10"
+                value={selectedServiceId}
+                onChange={(event) => onServiceChange(event.target.value)}
+                disabled={submitting}
+                required
+              >
+                <option value="">Choose a service</option>
+                {services.map((service) => (
+                  <option key={service.id} value={service.id}>{service.name}</option>
+                ))}
+              </select>
+              {selectedServiceId && (
+                <p className="mt-2 text-xs leading-5 text-ink/45">
+                  {services.find((service) => service.id === selectedServiceId)?.description}
+                </p>
+              )}
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-extrabold" htmlFor="preferred-date">Preferred date</label>
+              <input
+                id="preferred-date"
+                className="w-full rounded-2xl border border-ink/10 bg-cream/45 px-4 py-3 text-sm font-semibold text-ink outline-none transition focus:border-brand/40 focus:bg-white focus:ring-4 focus:ring-brand/10"
+                type="date"
+                min={today}
+                value={preferredDate}
+                onChange={(event) => setPreferredDate(event.target.value)}
+                disabled={submitting}
+                required
+              />
+            </div>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="mb-2 block text-sm font-extrabold" htmlFor="time-preference">Preferred time</label>
+              <select
+                id="time-preference"
+                className="w-full rounded-2xl border border-ink/10 bg-cream/45 px-4 py-3 text-sm font-semibold text-ink outline-none transition focus:border-brand/40 focus:bg-white focus:ring-4 focus:ring-brand/10"
+                value={timePreference}
+                onChange={(event) => setTimePreference(event.target.value)}
+                disabled={submitting}
+              >
+                <option value="any">Any time</option>
+                <option value="morning">Morning</option>
+                <option value="afternoon">Afternoon</option>
+              </select>
+            </div>
+            <div>
+              <label className="mb-2 block text-sm font-extrabold" htmlFor="patient-note">Note for the clinic <span className="font-normal text-ink/40">(optional)</span></label>
+              <input
+                id="patient-note"
+                className="w-full rounded-2xl border border-ink/10 bg-cream/45 px-4 py-3 text-sm text-ink outline-none transition focus:border-brand/40 focus:bg-white focus:ring-4 focus:ring-brand/10"
+                type="text"
+                maxLength={1000}
+                placeholder="Anything we should know?"
+                value={patientNote}
+                onChange={(event) => setPatientNote(event.target.value)}
+                disabled={submitting}
+              />
+            </div>
+          </div>
+
+          {error && <p className="rounded-2xl bg-[#fff0e7] px-4 py-3 text-sm leading-6 text-[#914b22]" role="alert">{error}</p>}
+          {success && <p className="rounded-2xl bg-mint px-4 py-3 text-sm leading-6 text-brand" role="status">{success}</p>}
+
+          <button className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand px-5 py-3 text-sm font-extrabold text-white shadow-lg shadow-teal-900/15 hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60" type="submit" disabled={submitting}>
+            {submitting ? 'Sending request…' : 'Request appointment'}
+            {!submitting && <CalendarCheck2 size={17} />}
+          </button>
+        </form>
+      )}
+    </section>
+  )
+}
+
+function AppointmentRequestCard({ value }) {
+  const request = appointmentRequestView(value)
+  return (
+    <article className="rounded-2xl border border-ink/6 bg-cream/45 p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="text-sm font-extrabold">{request.serviceName}</h3>
+          <p className="mt-1 text-xs text-ink/50">
+            Preferred: {formatDate(request.preferredDate)} · {timePreferenceLabels[request.timePreference] || titleCase(request.timePreference)}
+          </p>
+        </div>
+        <span className={`self-start rounded-full px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wide sm:self-auto ${requestStatusColors[request.status] || 'bg-cream text-ink/55'}`}>
+          {titleCase(request.status)}
+        </span>
+      </div>
+      {request.clinicNote && <p className="mt-3 rounded-xl bg-white/70 px-3 py-2 text-xs leading-5 text-ink/55">{request.clinicNote}</p>}
+    </article>
+  )
+}
+
 export default function AppointmentsPage() {
+  const [searchParams] = useSearchParams()
   const [upcoming, setUpcoming] = useState([])
   const [past, setPast] = useState([])
+  const [services, setServices] = useState([])
+  const [appointmentRequests, setAppointmentRequests] = useState([])
+  const [selectedServiceId, setSelectedServiceId] = useState(searchParams.get('service') || '')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -98,12 +273,16 @@ export default function AppointmentsPage() {
     setLoading(true)
     setError(null)
     try {
-      const [upcomingPayload, pastPayload] = await Promise.all([
+      const [upcomingPayload, pastPayload, servicesPayload, requestPayload] = await Promise.all([
         api.getAppointments('upcoming'),
         api.getAppointments('past'),
+        api.getServices(),
+        api.getAppointmentRequests(),
       ])
       setUpcoming(appointmentsFrom(upcomingPayload, 'upcoming'))
       setPast(appointmentsFrom(pastPayload, 'past'))
+      setServices(listFrom(servicesPayload, 'services').map(serviceView))
+      setAppointmentRequests(listFrom(requestPayload, 'appointmentRequests').map(appointmentRequestView))
     } catch (requestError) {
       setError(requestError)
     } finally {
@@ -114,6 +293,13 @@ export default function AppointmentsPage() {
   useEffect(() => {
     load()
   }, [load])
+
+  useEffect(() => {
+    const requestedService = searchParams.get('service')
+    if (requestedService && services.some((service) => service.id === requestedService)) {
+      setSelectedServiceId(requestedService)
+    }
+  }, [searchParams, services])
 
   return (
     <>
@@ -130,6 +316,31 @@ export default function AppointmentsPage() {
       ) : error ? (
         <ErrorState error={error} onRetry={load} />
       ) : (
+        <>
+          <BookingRequestForm
+            services={services}
+            selectedServiceId={selectedServiceId}
+            onServiceChange={setSelectedServiceId}
+            onCreated={(request) => setAppointmentRequests((current) => [request, ...current])}
+          />
+
+          {appointmentRequests.length > 0 && (
+            <section className="mb-10" aria-labelledby="booking-requests-heading">
+              <div className="mb-4 flex items-center gap-3">
+                <div className="grid h-10 w-10 place-items-center rounded-2xl bg-mint text-brand">
+                  <CalendarClock size={19} />
+                </div>
+                <div>
+                  <h2 id="booking-requests-heading" className="text-xl font-extrabold">My booking requests</h2>
+                  <p className="text-xs text-ink/45">The clinic will update you here after reviewing your request</p>
+                </div>
+              </div>
+              <div className="space-y-3">
+                {appointmentRequests.map((request) => <AppointmentRequestCard key={request.id} value={request} />)}
+              </div>
+            </section>
+          )}
+
         <div className="space-y-10">
           <section aria-labelledby="upcoming-heading">
             <div className="mb-4 flex items-center gap-3">
@@ -186,6 +397,7 @@ export default function AppointmentsPage() {
             )}
           </section>
         </div>
+        </>
       )}
     </>
   )
