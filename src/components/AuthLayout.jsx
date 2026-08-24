@@ -70,7 +70,7 @@ export default function AuthLayout({ children, servicesContent, title, descripti
             {servicesActive ? 'Back to login' : 'View dental services'}
             <ArrowRight size={15} />
           </button>
-          <div className="mt-8 rounded-[30px] bg-white p-6 soft-shadow sm:p-8 lg:mt-6 lg:p-6">
+          <div className="mt-8 rounded-[30px] bg-white p-6 soft-shadow sm:p-8 lg:mt-4 lg:p-5">
             {servicesActive && (
               <div className="mb-8 border-b border-ink/8 pb-8 lg:hidden" id="mobile-dental-services-panel">
                 {servicesContent}

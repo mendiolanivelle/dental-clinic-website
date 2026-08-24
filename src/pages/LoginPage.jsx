@@ -136,7 +136,7 @@ export default function LoginPage({ onAuthenticated, onStaffAuthenticated }) {
       servicesActive={showServices}
     >
       <>
-      <div className="mb-6 grid grid-cols-2 rounded-2xl bg-cream p-1" aria-label="Choose portal access">
+      <div className="mb-6 grid grid-cols-2 rounded-2xl bg-cream p-1 lg:mb-4" aria-label="Choose portal access">
         {[
           ['patient', 'Patient'],
           ['staff', 'Clinic staff'],
@@ -164,7 +164,7 @@ export default function LoginPage({ onAuthenticated, onStaffAuthenticated }) {
         </div>
       )}
 
-      <form className="space-y-5 lg:space-y-4" onSubmit={handleSubmit}>
+      <form className="space-y-5 lg:space-y-3" onSubmit={handleSubmit}>
         {access === 'patient' ? <>
           <div>
             <label className="mb-2 block text-sm font-extrabold" htmlFor="fullName">
@@ -264,7 +264,7 @@ export default function LoginPage({ onAuthenticated, onStaffAuthenticated }) {
         </button>
       </form>
 
-      <div className="mt-6 flex gap-3 rounded-2xl bg-mint/65 p-4 lg:mt-4">
+      <div className="mt-6 flex gap-3 rounded-2xl bg-mint/65 p-4 lg:mt-3">
         <LockKeyhole className="mt-0.5 shrink-0 text-brand" size={18} />
         <p className="text-xs leading-5 text-ink/60">
           {access === 'staff'
@@ -273,7 +273,7 @@ export default function LoginPage({ onAuthenticated, onStaffAuthenticated }) {
         </p>
       </div>
 
-      <div className="mt-6 border-t border-ink/8 pt-5 text-center lg:mt-4">
+      <div className="mt-6 border-t border-ink/8 pt-5 text-center lg:mt-3 lg:pt-4">
         <p className="text-xs text-ink/50">
           {access === 'staff' ? 'Need help with your staff account?' : 'Don’t have your patient ID?'}
         </p>
