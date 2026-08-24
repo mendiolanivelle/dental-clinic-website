@@ -571,6 +571,49 @@ export function createStore(db) {
       }))
     },
 
+    async createReceptionPatient({
+      displayName,
+      normalizedName,
+      patientNumber,
+      phoneE164,
+      now,
+    }) {
+      return db.transaction(async (client) => {
+        const existing = await client.query(
+          `SELECT id, display_name, patient_number, phone_e164
+           FROM patients
+           WHERE normalized_name = $1
+           LIMIT 1`,
+          [normalizedName],
+        )
+        if (existing.rowCount) return { outcome: 'already_exists' }
+
+        try {
+          const result = await client.query(
+            `INSERT INTO patients (
+               patient_number, display_name, normalized_name, phone_e164,
+               phone_verified_at, portal_enabled, created_at, updated_at
+             ) VALUES ($1, $2, $3, $4, NULL, true, $5, $5)
+             RETURNING id, display_name, patient_number, phone_e164`,
+            [patientNumber, displayName, normalizedName, phoneE164, now],
+          )
+          const row = result.rows[0]
+          return {
+            outcome: 'created',
+            patient: {
+              id: row.id,
+              displayName: row.display_name,
+              patientNumber: row.patient_number,
+              phone: row.phone_e164,
+            },
+          }
+        } catch (error) {
+          if (error.code === '23505') return { outcome: 'already_exists' }
+          throw error
+        }
+      })
+    },
+
     async createAppointmentRequest({
       patientId,
       appointmentTypeId,

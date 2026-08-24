@@ -94,4 +94,8 @@ export const api = {
     request(`/api/staff/calendar?date=${encodeURIComponent(date)}`),
   searchReceptionPatients: (query) =>
     request(`/api/staff/patients?q=${encodeURIComponent(query)}`),
+  createReceptionPatient: (details) => request('/api/staff/patients', {
+    method: 'POST',
+    body: json(details),
+  }),
 }

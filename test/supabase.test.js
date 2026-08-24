@@ -65,6 +65,10 @@ test('the backend role stays least-privilege and the forward migration removes O
     new URL('../server/store.js', import.meta.url),
     'utf8',
   )
+  const patientAccountSql = await readFile(
+    new URL('../migrations/007_reception_patient_accounts.sql', import.meta.url),
+    'utf8',
+  )
   const compact = securitySql.replace(/\s+/g, ' ')
 
   assert.doesNotMatch(securitySql, /\bDELETE\b/)
@@ -108,6 +112,8 @@ test('the backend role stays least-privilege and the forward migration removes O
   assert.doesNotMatch(receptionSql, /GRANT[^;]*clinical_records/i)
   assert.doesNotMatch(receptionSql, /\bDELETE\b/i)
   assert.match(storeSql, /WHERE \$4::timestamptz > \$7::timestamptz/)
+  assert.match(patientAccountSql, /ALTER COLUMN phone_e164 DROP NOT NULL/i)
+  assert.match(patientAccountSql, /GRANT INSERT ON dental_portal\.patients TO dental_portal_backend/i)
 })
 
 test('production permits Supabase direct/session connections and rejects other hosts or transaction pooling', () => {

@@ -16,6 +16,9 @@ export const sha256 = (value) => createHash('sha256').update(value).digest('hex'
 export const createSessionToken = (randomBytesFn = randomBytes) =>
   randomBytesFn(32).toString('base64url')
 
+export const createPatientNumber = (randomBytesFn = randomBytes) =>
+  `PT-${randomBytesFn(6).toString('hex').toUpperCase()}`
+
 export const ipDigest = (pepper, ip) => hmacDigest(pepper, ip || 'unknown')
 
 export const addHours = (date, hours) => new Date(date.getTime() + hours * 3_600_000)

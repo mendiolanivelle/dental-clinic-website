@@ -2,8 +2,10 @@ import {
   SESSION_COOKIE,
   STAFF_SESSION_COOKIE,
   addHours,
+  createPatientNumber,
   createSessionToken,
   ipDigest,
+  normalizeName,
   sessionCookieOptions,
   sha256,
 } from '../auth.js'
@@ -243,6 +245,56 @@ export default async function staffRoutes(
       const patients = await store.searchReceptionPatients(request.query.q.trim())
       await audit(request, 'staff.patient_directory_searched')
       return { patients }
+    },
+  )
+
+  app.post(
+    '/api/staff/patients',
+    {
+      preHandler: requireReception,
+      schema: {
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['displayName'],
+          properties: {
+            displayName: { type: 'string', minLength: 2, maxLength: 160 },
+            phone: { type: 'string', maxLength: 32, pattern: '^[+0-9 ()-]*$' },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const displayName = request.body.displayName.trim().replace(/\s+/gu, ' ')
+      const normalizedName = normalizeName(displayName)
+      const phoneE164 = request.body.phone?.trim() || null
+      if (!normalizedName) {
+        return reply.code(400).send({
+          error: { code: 'INVALID_REQUEST', message: 'Enter the patient’s full name.' },
+        })
+      }
+
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const result = await store.createReceptionPatient({
+          displayName,
+          normalizedName,
+          patientNumber: createPatientNumber(randomBytes),
+          phoneE164,
+          now: now(),
+        })
+        if (result.outcome === 'already_exists') {
+          return reply.code(409).send({
+            error: { code: 'PATIENT_EXISTS', message: 'A patient with that name already exists.' },
+          })
+        }
+        if (result.outcome === 'created') {
+          await audit(request, 'staff.patient_account_created', 'patient', result.patient.id)
+          return reply.code(201).send({ patient: result.patient })
+        }
+      }
+      return reply.code(503).send({
+        error: { code: 'PATIENT_ID_UNAVAILABLE', message: 'A patient ID could not be generated. Please try again.' },
+      })
     },
   )
 }

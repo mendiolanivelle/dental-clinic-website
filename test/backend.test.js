@@ -279,6 +279,19 @@ class MemoryStore {
       : []
   }
 
+  async createReceptionPatient(input) {
+    if (input.normalizedName === normalizeName(this.patient.displayName)) return { outcome: 'already_exists' }
+    const patient = {
+      id: '10000000-0000-4000-8000-000000000003',
+      displayName: input.displayName,
+      patientNumber: input.patientNumber,
+      phone: input.phoneE164,
+      enabled: true,
+    }
+    this.createdPatient = patient
+    return { outcome: 'created', patient }
+  }
+
   async listAvailability(date, now) {
     const day = new Date(`${date}T00:00:00Z`).getUTCDay()
     if (day === 0) return []
@@ -652,6 +665,23 @@ test('reception staff use a separate protected session and can confirm booking r
     })
     assert.equal(patients.statusCode, 200)
     assert.equal(patients.json().patients[0].patientNumber, 'PT-DEMO01')
+
+    const missingPatients = await staffApp.inject({
+      url: '/api/staff/patients?q=New Patient',
+      headers: { cookie },
+    })
+    assert.equal(missingPatients.statusCode, 200)
+    assert.deepEqual(missingPatients.json().patients, [])
+
+    const createdPatient = await staffApp.inject({
+      method: 'POST',
+      url: '/api/staff/patients',
+      headers: { origin: config.publicOrigin, cookie },
+      payload: { displayName: 'New Patient', phone: '+639123456789' },
+    })
+    assert.equal(createdPatient.statusCode, 201)
+    assert.match(createdPatient.json().patient.patientNumber, /^PT-[A-F0-9]{12}$/)
+    assert.equal(createdPatient.json().patient.displayName, 'New Patient')
 
     const confirmed = await staffApp.inject({
       method: 'PATCH',

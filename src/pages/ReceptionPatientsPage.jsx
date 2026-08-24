@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { IdCard, Phone, Search, UsersRound } from 'lucide-react'
+import { Check, Copy, IdCard, Phone, Search, UserPlus, UsersRound } from 'lucide-react'
 import { api } from '../api'
 import { EmptyState } from '../components/PageState'
 
@@ -9,6 +9,12 @@ export default function ReceptionPatientsPage() {
   const [searched, setSearched] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [showCreate, setShowCreate] = useState(false)
+  const [createName, setCreateName] = useState('')
+  const [createPhone, setCreatePhone] = useState('')
+  const [creating, setCreating] = useState(false)
+  const [createdPatient, setCreatedPatient] = useState(null)
+  const [copied, setCopied] = useState(false)
 
   async function search(event) {
     event.preventDefault()
@@ -22,11 +28,41 @@ export default function ReceptionPatientsPage() {
       const data = await api.searchReceptionPatients(query.trim())
       setPatients(data.patients || [])
       setSearched(true)
+      setCreatedPatient(null)
+      setShowCreate(false)
     } catch (requestError) {
       setError(requestError.message || 'The patient search could not be completed.')
     } finally {
       setLoading(false)
     }
+  }
+
+  async function createPatient(event) {
+    event.preventDefault()
+    setCreating(true)
+    setError('')
+    try {
+      const data = await api.createReceptionPatient({
+        displayName: createName.trim(),
+        phone: createPhone.trim(),
+      })
+      setCreatedPatient(data.patient)
+      setPatients([data.patient])
+      setSearched(true)
+      setShowCreate(false)
+      setQuery(data.patient.displayName)
+    } catch (requestError) {
+      setError(requestError.message || 'The patient account could not be created.')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  async function copyPatientId() {
+    if (!createdPatient?.patientNumber) return
+    await navigator.clipboard?.writeText(createdPatient.patientNumber)
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1800)
   }
 
   return <>
@@ -43,8 +79,51 @@ export default function ReceptionPatientsPage() {
       <button className="rounded-2xl bg-brand px-6 py-3 text-sm font-extrabold text-white hover:bg-brand-dark disabled:opacity-60" disabled={loading} type="submit">{loading ? 'Searching…' : 'Search'}</button>
     </form>
     {error && <p className="mt-4 rounded-2xl bg-[#fff0e7] p-4 text-sm text-[#914b22]" role="alert">{error}</p>}
+    {showCreate && (
+      <form className="mt-6 rounded-3xl border border-brand/15 bg-mint/55 p-5 sm:p-6" onSubmit={createPatient}>
+        <div className="flex items-start gap-3">
+          <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-white text-brand"><UserPlus size={20} /></div>
+          <div>
+            <h2 className="font-extrabold">Create patient account</h2>
+            <p className="mt-1 text-sm leading-6 text-ink/55">A secure portal ID will be generated automatically after you save this patient.</p>
+          </div>
+        </div>
+        <div className="mt-5 grid gap-4 sm:grid-cols-2">
+          <div>
+            <label className="mb-2 block text-sm font-extrabold" htmlFor="new-patient-name">Full name</label>
+            <input id="new-patient-name" className="input-field" value={createName} onChange={(event) => setCreateName(event.target.value)} placeholder="First Middle Last" required />
+          </div>
+          <div>
+            <label className="mb-2 block text-sm font-extrabold" htmlFor="new-patient-phone">Phone <span className="font-normal text-ink/40">(optional)</span></label>
+            <input id="new-patient-phone" className="input-field" type="tel" value={createPhone} onChange={(event) => setCreatePhone(event.target.value)} placeholder="+63 9XX XXX XXXX" />
+          </div>
+        </div>
+        <div className="mt-5 flex flex-wrap gap-2">
+          <button className="rounded-xl bg-brand px-4 py-2.5 text-xs font-extrabold text-white hover:bg-brand-dark disabled:opacity-60" type="submit" disabled={creating}>{creating ? 'Creating…' : 'Create account'}</button>
+          <button className="rounded-xl px-4 py-2.5 text-xs font-extrabold text-ink/55 hover:bg-white" type="button" onClick={() => setShowCreate(false)}>Cancel</button>
+        </div>
+      </form>
+    )}
+    {createdPatient && (
+      <div className="mt-6 flex flex-col gap-4 rounded-3xl border border-brand/20 bg-white p-5 soft-shadow sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-xs font-extrabold uppercase tracking-[.16em] text-brand/60">Patient account created</p>
+          <h2 className="mt-1 text-lg font-extrabold">Give this ID to {createdPatient.displayName.split(' ')[0]}</h2>
+          <p className="mt-1 text-sm text-ink/50">They will use it with their full name to open the patient portal.</p>
+        </div>
+        <button className="inline-flex items-center justify-center gap-2 rounded-2xl bg-brand px-4 py-3 text-sm font-extrabold text-white hover:bg-brand-dark" type="button" onClick={copyPatientId}>
+          {copied ? <Check size={16} /> : <Copy size={16} />}
+          {copied ? 'Copied' : createdPatient.patientNumber}
+        </button>
+      </div>
+    )}
     <div className="mt-6">
-      {searched && !patients.length ? <EmptyState icon={UsersRound} title="No patient found" message="Check the spelling or patient ID and try again." /> : (
+      {searched && !patients.length ? <EmptyState
+        icon={UsersRound}
+        title="No patient found"
+        message="Check the spelling or create a new patient account for this person."
+        action={<button className="mt-4 inline-flex items-center gap-2 rounded-xl bg-brand px-4 py-2.5 text-xs font-extrabold text-white hover:bg-brand-dark" type="button" onClick={() => { setCreateName(query.trim()); setShowCreate(true); setError('') }}><UserPlus size={15} /> Create patient account</button>}
+      /> : (
         <div className="grid gap-4 md:grid-cols-2">
           {patients.map((patient) => (
             <article className="rounded-3xl bg-white p-5 soft-shadow" key={patient.id}>
