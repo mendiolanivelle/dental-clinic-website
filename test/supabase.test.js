@@ -81,6 +81,10 @@ test('the backend role stays least-privilege and the forward migration removes O
     new URL('../migrations/010_patient_vitals.sql', import.meta.url),
     'utf8',
   )
+  const checkoutRecordsSql = await readFile(
+    new URL('../migrations/011_checkout_clinical_records.sql', import.meta.url),
+    'utf8',
+  )
   const compact = securitySql.replace(/\s+/g, ' ')
 
   assert.doesNotMatch(securitySql, /\bDELETE\b/)
@@ -101,6 +105,11 @@ test('the backend role stays least-privilege and the forward migration removes O
   assert.match(vitalsSql, /ADD COLUMN weight_kg numeric\(5, 2\)/)
   assert.match(vitalsSql, /blood_pressure_systolic > blood_pressure_diastolic/)
   assert.match(vitalsSql, /GRANT UPDATE \([\s\S]*weight_kg[\s\S]*\) ON dental_portal\.patients TO dental_portal_backend;/)
+  assert.match(checkoutRecordsSql, /SECURITY DEFINER/)
+  assert.match(checkoutRecordsSql, /REVOKE ALL ON FUNCTION dental_portal\.publish_checkout_record\(\) FROM PUBLIC/)
+  assert.match(checkoutRecordsSql, /AFTER INSERT ON dental_portal\.patient_charges/)
+  assert.match(checkoutRecordsSql, /INSERT INTO dental_portal\.clinical_records[\s\S]*FROM dental_portal\.patient_charges charge/)
+  assert.doesNotMatch(checkoutRecordsSql, /GRANT[^;]*clinical_records/i)
 
   assert.match(
     removalSql,
