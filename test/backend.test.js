@@ -302,7 +302,7 @@ class MemoryStore {
     )
     if (!appointment) return { outcome: 'not_found' }
     const totalCents = input.subtotalCents - input.discountCents
-    if (totalCents <= 0 || input.paymentAmountCents > totalCents) return { outcome: 'invalid_amount' }
+    if (totalCents <= 0 || input.paymentAmountCents <= 0 || input.paymentAmountCents > totalCents) return { outcome: 'invalid_amount' }
     appointment.status = 'completed'
     const charge = {
       id: 'a0000000-0000-4000-8000-000000000001',
@@ -888,6 +888,21 @@ test('reception staff use a separate protected session and can confirm booking r
     const billing = await staffApp.inject({ url: '/api/staff/billing', headers: { cookie } })
     assert.equal(billing.statusCode, 200)
     assert.equal(billing.json().awaitingCheckout[0].id, '30000000-0000-4000-8000-000000000001')
+
+    const checkoutWithoutPayment = await staffApp.inject({
+      method: 'POST',
+      url: '/api/staff/appointments/30000000-0000-4000-8000-000000000001/checkout',
+      headers: { origin: config.publicOrigin, cookie },
+      payload: {
+        description: 'Brace adjustment',
+        subtotalCents: 250000,
+        discountCents: 50000,
+        paymentAmountCents: 0,
+        paymentMethod: 'cash',
+      },
+    })
+    assert.equal(checkoutWithoutPayment.statusCode, 400)
+    assert.equal(staffStore.charges.length, 0)
 
     const checkout = await staffApp.inject({
       method: 'POST',

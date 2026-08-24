@@ -256,12 +256,12 @@ export default async function staffRoutes(
         body: {
           type: 'object',
           additionalProperties: false,
-          required: ['description', 'subtotalCents', 'discountCents', 'paymentAmountCents'],
+          required: ['description', 'subtotalCents', 'discountCents', 'paymentAmountCents', 'paymentMethod'],
           properties: {
             description: { type: 'string', minLength: 1, maxLength: 240 },
             subtotalCents: { type: 'integer', minimum: 1, maximum: 100_000_000 },
             discountCents: { type: 'integer', minimum: 0, maximum: 100_000_000 },
-            paymentAmountCents: { type: 'integer', minimum: 0, maximum: 100_000_000 },
+            paymentAmountCents: { type: 'integer', minimum: 1, maximum: 100_000_000 },
             paymentMethod: { type: 'string', enum: paymentMethods },
             paymentReference: { type: 'string', maxLength: 120 },
             invoiceReference: { type: 'string', maxLength: 120 },
@@ -271,7 +271,7 @@ export default async function staffRoutes(
     },
     async (request, reply) => {
       const description = request.body.description.trim()
-      if (!description || (request.body.paymentAmountCents > 0 && !request.body.paymentMethod)) {
+      if (!description) {
         return reply.code(400).send({
           error: { code: 'INVALID_REQUEST', message: 'Complete the service and payment details.' },
         })
@@ -283,7 +283,7 @@ export default async function staffRoutes(
         subtotalCents: request.body.subtotalCents,
         discountCents: request.body.discountCents,
         paymentAmountCents: request.body.paymentAmountCents,
-        paymentMethod: request.body.paymentMethod || null,
+        paymentMethod: request.body.paymentMethod,
         paymentReference: request.body.paymentReference?.trim() || null,
         invoiceReference: request.body.invoiceReference?.trim() || null,
         now: now(),

@@ -11,7 +11,7 @@ const recordLabel = (number) => `PAY-${String(number).padStart(6, '0')}`
 function PaymentFields({ amount, setAmount, method, setMethod, reference, setReference, max }) {
   return <div className="grid gap-4 sm:grid-cols-3">
     <label className="text-sm font-extrabold">Amount received
-      <input className="mt-2 w-full rounded-2xl border border-ink/10 bg-white px-4 py-3 font-semibold" type="number" min="0" max={max} step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} />
+      <input className="mt-2 w-full rounded-2xl border border-ink/10 bg-white px-4 py-3 font-semibold" type="number" min="0.01" max={max} step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} required />
     </label>
     <label className="text-sm font-extrabold">Payment method
       <select className="mt-2 w-full rounded-2xl border border-ink/10 bg-white px-4 py-3 font-semibold" value={method} onChange={(event) => setMethod(event.target.value)}>
@@ -77,7 +77,7 @@ export default function ReceptionBillingPage() {
     const subtotalCents = toCents(subtotal)
     const discountCents = toCents(discount)
     const paymentAmountCents = toCents(amount)
-    if (!description.trim() || subtotalCents <= 0 || discountCents >= subtotalCents || paymentAmountCents > subtotalCents - discountCents) {
+    if (!description.trim() || subtotalCents <= 0 || discountCents < 0 || discountCents >= subtotalCents || paymentAmountCents <= 0 || paymentAmountCents > subtotalCents - discountCents) {
       setFormError('Check the service, charge, discount, and amount received.')
       return
     }
@@ -89,7 +89,7 @@ export default function ReceptionBillingPage() {
         subtotalCents,
         discountCents,
         paymentAmountCents,
-        ...(paymentAmountCents ? { paymentMethod: method } : {}),
+        paymentMethod: method,
         paymentReference: reference.trim(),
         invoiceReference: invoiceReference.trim(),
       })
@@ -146,6 +146,7 @@ export default function ReceptionBillingPage() {
   const awaiting = state.data?.awaitingCheckout || []
   const charges = state.data?.charges || []
   const selectedCharge = charges.find(({ id }) => id === selectedChargeId)
+  const outstandingCharges = charges.filter(({ balanceCents }) => balanceCents > 0)
   const todayPayments = state.data?.todayPayments || []
   const todayTotal = todayPayments.reduce((sum, item) => sum + item.totalCents, 0)
   const periodPayments = charges.flatMap((charge) => charge.payments
@@ -154,6 +155,14 @@ export default function ReceptionBillingPage() {
   const periodTotal = periodPayments
     .filter(({ status }) => status === 'posted')
     .reduce((sum, payment) => sum + payment.amountCents, 0)
+  const subtotalCents = toCents(subtotal)
+  const discountCents = toCents(discount)
+  const paymentAmountCents = toCents(amount)
+  const canCompleteCheckout = Boolean(
+    checkout && description.trim() && subtotalCents > 0 && discountCents >= 0 &&
+    discountCents < subtotalCents && paymentAmountCents > 0 &&
+    paymentAmountCents <= subtotalCents - discountCents,
+  )
 
   return <>
     <div className="mb-8">
@@ -201,7 +210,7 @@ export default function ReceptionBillingPage() {
         <label className="mt-4 block text-sm font-extrabold">BIR invoice reference <span className="font-normal text-ink/40">(optional)</span>
           <input className="mt-2 w-full rounded-2xl border border-ink/10 bg-white px-4 py-3 font-semibold sm:max-w-sm" maxLength="120" value={invoiceReference} onChange={(event) => setInvoiceReference(event.target.value)} placeholder="Number from the clinic invoice" />
         </label>
-        <button className="mt-5 rounded-2xl bg-brand px-5 py-3 text-sm font-extrabold text-white hover:bg-brand-dark disabled:opacity-60" disabled={busy} type="submit">{busy ? 'Recording…' : 'Complete checkout'}</button>
+        <button className="mt-5 rounded-2xl bg-brand px-5 py-3 text-sm font-extrabold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-40" disabled={busy || !canCompleteCheckout} type="submit">{busy ? 'Recording…' : 'Complete checkout'}</button>
       </form>}
       <div className="mt-5 grid gap-4 xl:grid-cols-2">
         {awaiting.map((appointment) => <article className="rounded-3xl bg-white p-5 soft-shadow" key={appointment.id}>
@@ -229,6 +238,10 @@ export default function ReceptionBillingPage() {
           <span className="text-xs font-extrabold uppercase tracking-wide text-brand/65">{periodPayments.length} transaction{periodPayments.length === 1 ? '' : 's'}</span>
           <strong className="text-lg text-brand">{formatCurrency(periodTotal)}</strong>
         </div>
+        {!!outstandingCharges.length && <div className="border-b border-ink/5 bg-[#fff8ed] px-5 py-4 sm:px-6">
+          <p className="mb-3 text-xs font-extrabold uppercase tracking-wide text-[#9a5d22]">Outstanding balances</p>
+          <div className="space-y-2">{outstandingCharges.map((charge) => <button className="flex w-full flex-col gap-2 rounded-2xl bg-white px-4 py-3 text-left transition hover:ring-2 hover:ring-[#d99a52]/20 sm:flex-row sm:items-center" key={`outstanding-${charge.id}`} type="button" onClick={() => { setSelectedChargeId(charge.id); setPayingCharge(null); setFormError('') }}><span className="min-w-0 flex-1"><strong className="block text-sm">{charge.patient.displayName}</strong><span className="text-xs text-ink/45">{charge.description} · {recordLabel(charge.recordNumber)}</span></span><span className="text-sm font-extrabold text-[#9a5d22]">{formatCurrency(charge.balanceCents)} due</span><span className="text-xs font-extrabold text-brand/60">View details</span></button>)}</div>
+        </div>}
         {periodPayments.map(({ charge, ...payment }) => <button className={`grid w-full gap-2 border-b border-ink/5 px-5 py-4 text-left text-sm transition last:border-0 hover:bg-mint/35 focus:outline-none focus:ring-4 focus:ring-inset focus:ring-brand/10 sm:grid-cols-[1.3fr_.8fr_1fr_1.2fr_auto] sm:items-center sm:px-6 ${payment.status === 'voided' ? 'text-ink/35' : ''}`} key={payment.id} type="button" onClick={() => { setSelectedChargeId(charge.id); setPayingCharge(null); setFormError('') }}>
           <div><p className="font-extrabold">{charge.patient.displayName}</p><p className="mt-1 text-xs text-ink/45">{charge.description} · {charge.dentistName}</p></div>
           <div className={payment.status === 'voided' ? 'line-through' : ''}><p className="font-extrabold">{formatCurrency(payment.amountCents)}</p><p className="mt-1 text-xs text-ink/45">{titleCase(payment.method)} · {titleCase(payment.status)}</p></div>

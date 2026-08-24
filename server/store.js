@@ -663,7 +663,7 @@ export function createStore(db) {
         )
         if (!selected.rowCount) return { outcome: 'not_found' }
         const totalCents = subtotalCents - discountCents
-        if (totalCents <= 0 || paymentAmountCents > totalCents) {
+        if (totalCents <= 0 || paymentAmountCents <= 0 || paymentAmountCents > totalCents) {
           return { outcome: 'invalid_amount' }
         }
 
@@ -693,15 +693,13 @@ export function createStore(db) {
           throw error
         }
         const chargeId = inserted.rows[0].id
-        if (paymentAmountCents > 0) {
-          await client.query(
-            `INSERT INTO patient_payments (
-               charge_id, amount_cents, method, external_reference,
-               recorded_by_staff_id, received_at
-             ) VALUES ($1, $2, $3, $4, $5, $6)`,
-            [chargeId, paymentAmountCents, paymentMethod, paymentReference, staffId, now],
-          )
-        }
+        await client.query(
+          `INSERT INTO patient_payments (
+             charge_id, amount_cents, method, external_reference,
+             recorded_by_staff_id, received_at
+           ) VALUES ($1, $2, $3, $4, $5, $6)`,
+          [chargeId, paymentAmountCents, paymentMethod, paymentReference, staffId, now],
+        )
         await updateChargeStatus(client, chargeId, now)
         await client.query(
           `UPDATE appointments SET status = 'completed', updated_at = $2 WHERE id = $1`,
