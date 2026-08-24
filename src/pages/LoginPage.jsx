@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useLocation } from 'react-router-dom'
-import { ArrowLeft, ArrowRight, Clock3, IdCard, LockKeyhole, Phone, Sparkles, UserRound } from 'lucide-react'
+import { ArrowRight, Clock3, IdCard, LockKeyhole, Phone, Sparkles, UserRound } from 'lucide-react'
 import { api } from '../api'
 import AuthLayout from '../components/AuthLayout'
 import ClinicPhoneLink from '../components/ClinicPhoneLink'
@@ -38,10 +38,10 @@ const services = [
   },
 ]
 
-function ServicesPanel({ onBack }) {
+function ServicesPanel() {
   return (
-    <div>
-      <div className="mb-6 flex items-start justify-between gap-4">
+    <div className="rounded-[28px] bg-white p-5 text-ink shadow-xl sm:p-6">
+      <div className="mb-6">
         <div>
           <div className="flex items-center gap-2 text-brand">
             <Sparkles size={18} />
@@ -50,10 +50,6 @@ function ServicesPanel({ onBack }) {
           <h2 className="mt-2 text-2xl font-extrabold tracking-tight">Dental services</h2>
           <p className="mt-2 text-sm leading-6 text-ink/55">Explore our services, then call the clinic to ask a question or request an appointment.</p>
         </div>
-        <button className="inline-flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-extrabold text-brand hover:bg-mint" type="button" onClick={onBack}>
-          <ArrowLeft size={15} />
-          Login
-        </button>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">
@@ -113,15 +109,13 @@ export default function LoginPage({ onAuthenticated }) {
 
   return (
     <AuthLayout
-      title={showServices ? 'Find the right care for your smile' : 'Welcome back'}
-      description={showServices ? 'Browse our most requested dental services before you sign in.' : 'Enter the details provided by your clinic to securely view your dental care information.'}
+      title="Welcome back"
+      description="Enter the details provided by your clinic to securely view your dental care information."
+      servicesContent={<ServicesPanel />}
       onServicesClick={() => setShowServices((visible) => !visible)}
       servicesActive={showServices}
     >
-      {showServices ? (
-        <ServicesPanel onBack={() => setShowServices(false)} />
-      ) : (
-        <>
+      <>
       {location.state?.sessionExpired && (
         <div className="mb-5 rounded-2xl bg-[#fff4e9] px-4 py-3 text-sm leading-6 text-[#8b4d21]" role="status">
           Your session expired to keep your records private. Please sign in again.
@@ -207,8 +201,7 @@ export default function LoginPage({ onAuthenticated }) {
           Call the clinic
         </ClinicPhoneLink>
       </div>
-        </>
-      )}
+      </>
     </AuthLayout>
   )
 }

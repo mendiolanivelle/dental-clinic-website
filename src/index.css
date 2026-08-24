@@ -39,6 +39,13 @@ button:not(:disabled), a { cursor: pointer; }
 .card-hover { transition: transform .2s ease, box-shadow .2s ease; }
 .card-hover:hover { transform: translateY(-3px); box-shadow: 0 18px 44px rgba(23, 60, 58, 0.11); }
 
+.services-cta { animation: services-cta-pulse 2.6s ease-in-out infinite; }
+.services-cta:hover, .services-cta:focus-visible { animation-play-state: paused; }
+@keyframes services-cta-pulse {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+
 :where(a, button, input):focus-visible {
   outline: 2px solid #176b68;
   outline-offset: 3px;
