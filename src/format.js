@@ -46,6 +46,28 @@ export function formatCurrency(cents = 0) {
   }).format(cents / 100)
 }
 
+export function isInManilaPaymentPeriod(value, period, now = new Date()) {
+  const key = (input) => {
+    const date = asDate(input)
+    if (!date) return ''
+    const parts = new Intl.DateTimeFormat('en', {
+      timeZone: MANILA_TIME_ZONE,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(date)
+    const part = (type) => parts.find((item) => item.type === type)?.value
+    return `${part('year')}-${part('month')}-${part('day')}`
+  }
+  const paymentDay = key(value)
+  const today = key(now)
+  if (!paymentDay || !today) return false
+  if (period === 'today') return paymentDay === today
+  const weekStart = new Date(`${today}T00:00:00Z`)
+  weekStart.setUTCDate(weekStart.getUTCDate() - weekStart.getUTCDay())
+  return paymentDay >= weekStart.toISOString().slice(0, 10) && paymentDay <= today
+}
+
 export function calendarWeek(value) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value || '')) return []
   const date = new Date(`${value}T00:00:00Z`)

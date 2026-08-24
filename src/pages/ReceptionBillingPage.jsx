@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Banknote, CheckCircle2, CreditCard, ReceiptText, RotateCcw } from 'lucide-react'
 import { api } from '../api'
 import { EmptyState, ErrorState, LoadingState } from '../components/PageState'
-import { formatCurrency, formatDate, formatTime, titleCase } from '../format'
+import { formatCurrency, formatDate, formatTime, isInManilaPaymentPeriod, titleCase } from '../format'
 
 const methods = ['cash', 'gcash', 'maya', 'card', 'bank_transfer', 'other']
 const toCents = (value) => Math.round(Number(value || 0) * 100)
@@ -38,6 +38,7 @@ export default function ReceptionBillingPage() {
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [formError, setFormError] = useState('')
+  const [ledgerPeriod, setLedgerPeriod] = useState('today')
 
   const load = useCallback(() => {
     setState((current) => ({ ...current, loading: true, error: null }))
@@ -135,6 +136,12 @@ export default function ReceptionBillingPage() {
   const charges = state.data?.charges || []
   const todayPayments = state.data?.todayPayments || []
   const todayTotal = todayPayments.reduce((sum, item) => sum + item.totalCents, 0)
+  const periodPayments = charges.flatMap((charge) => charge.payments
+    .filter((payment) => isInManilaPaymentPeriod(payment.receivedAt, ledgerPeriod))
+    .map((payment) => ({ ...payment, charge })))
+  const periodTotal = periodPayments
+    .filter(({ status }) => status === 'posted')
+    .reduce((sum, payment) => sum + payment.amountCents, 0)
 
   return <>
     <div className="mb-8">
@@ -195,8 +202,33 @@ export default function ReceptionBillingPage() {
       {!awaiting.length && <div className="mt-5"><EmptyState icon={CheckCircle2} title="No visits awaiting checkout" message="Confirmed appointments will appear here for reception." /></div>}
     </section>
 
+    <section className="mb-10" aria-labelledby="payment-ledger-heading">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h2 id="payment-ledger-heading" className="text-xl font-extrabold">{ledgerPeriod === 'today' ? "Today's" : "This week's"} payment ledger</h2>
+          <p className="mt-1 text-sm text-ink/45">Posted and voided transactions recorded by reception.</p>
+        </div>
+        <div className="inline-flex w-fit rounded-2xl bg-white p-1 soft-shadow" role="group" aria-label="Payment ledger period">
+          {['today', 'week'].map((period) => <button className={`rounded-xl px-4 py-2 text-xs font-extrabold transition ${ledgerPeriod === period ? 'bg-brand text-white' : 'text-ink/50 hover:bg-mint'}`} key={period} type="button" aria-pressed={ledgerPeriod === period} onClick={() => setLedgerPeriod(period)}>{period === 'today' ? 'Today' : 'This week'}</button>)}
+        </div>
+      </div>
+      <div className="mt-5 overflow-hidden rounded-3xl bg-white soft-shadow">
+        <div className="flex items-center justify-between gap-4 border-b border-ink/5 bg-mint/45 px-5 py-4 sm:px-6">
+          <span className="text-xs font-extrabold uppercase tracking-wide text-brand/65">{periodPayments.length} transaction{periodPayments.length === 1 ? '' : 's'}</span>
+          <strong className="text-lg text-brand">{formatCurrency(periodTotal)}</strong>
+        </div>
+        {periodPayments.map(({ charge, ...payment }) => <div className={`grid gap-2 border-b border-ink/5 px-5 py-4 text-sm last:border-0 sm:grid-cols-[1.3fr_.8fr_1fr_1.2fr] sm:items-center sm:px-6 ${payment.status === 'voided' ? 'text-ink/35 line-through' : ''}`} key={payment.id}>
+          <div><p className="font-extrabold">{charge.patient.displayName}</p><p className="mt-1 text-xs text-ink/45">{charge.description} · {charge.dentistName}</p></div>
+          <div><p className="font-extrabold">{formatCurrency(payment.amountCents)}</p><p className="mt-1 text-xs text-ink/45">{titleCase(payment.method)} · {titleCase(payment.status)}</p></div>
+          <div className="text-xs text-ink/55">{formatDate(payment.receivedAt)}<br />{formatTime(payment.receivedAt)}</div>
+          <div className="text-xs font-bold text-brand/70">Recorded by {payment.recordedBy}</div>
+        </div>)}
+        {!periodPayments.length && <div className="p-5 sm:p-6"><EmptyState icon={ReceiptText} title={`No payments ${ledgerPeriod === 'today' ? 'today' : 'this week'}`} message="Newly recorded payments will appear here automatically." /></div>}
+      </div>
+    </section>
+
     <section aria-labelledby="ledger-heading">
-      <h2 id="ledger-heading" className="text-xl font-extrabold">Patient payment ledger</h2>
+      <h2 id="ledger-heading" className="text-xl font-extrabold">Patient balances & payment history</h2>
       <div className="mt-5 space-y-4">
         {charges.map((charge) => <article className="rounded-3xl bg-white p-5 soft-shadow sm:p-6" key={charge.id}>
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
