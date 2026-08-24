@@ -235,15 +235,17 @@ class MemoryStore {
   }
 
   async listReceptionRequests() {
-    return this.appointmentRequests.map(({ patientId: _patientId, ...request }) => ({
-      ...request,
-      patient: {
-        id: this.patient.id,
-        displayName: this.patient.displayName,
-        patientNumber: this.patient.patientNumber,
-        phone: '+639000000001',
-      },
-    }))
+    return this.appointmentRequests
+      .filter(({ status }) => status === 'requested')
+      .map(({ patientId: _patientId, ...request }) => ({
+        ...request,
+        patient: {
+          id: this.patient.id,
+          displayName: this.patient.displayName,
+          patientNumber: this.patient.patientNumber,
+          phone: '+639000000001',
+        },
+      }))
   }
 
   async listReceptionCalendar() {
@@ -882,6 +884,12 @@ test('reception staff use a separate protected session and can confirm booking r
     assert.equal(confirmed.statusCode, 204)
     assert.equal(staffStore.appointmentRequests[0].status, 'confirmed')
     assert.ok(staffStore.appointments.some(({ id }) => id === '31000000-0000-4000-8000-000000000001'))
+    const remainingRequests = await staffApp.inject({
+      url: '/api/staff/appointment-requests',
+      headers: { cookie },
+    })
+    assert.equal(remainingRequests.statusCode, 200)
+    assert.equal(remainingRequests.json().appointmentRequests.length, 0)
 
     const logout = await staffApp.inject({
       method: 'POST',

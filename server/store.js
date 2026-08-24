@@ -546,7 +546,8 @@ export function createStore(db) {
          JOIN appointment_types t ON t.id = r.appointment_type_id
          LEFT JOIN dentists d ON d.id = r.dentist_id
          JOIN patients p ON p.id = r.patient_id
-         ORDER BY (r.status = 'requested') DESC, r.created_at DESC
+         WHERE r.status = 'requested'
+         ORDER BY r.created_at DESC
          LIMIT 100`,
       )
       return result.rows.map(receptionRequestFromRow)
