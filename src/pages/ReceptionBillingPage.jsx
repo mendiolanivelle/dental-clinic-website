@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Banknote, CheckCircle2, CreditCard, ReceiptText, RotateCcw } from 'lucide-react'
+import { Banknote, CheckCircle2, CreditCard, ReceiptText, RotateCcw, X } from 'lucide-react'
 import { api } from '../api'
 import { EmptyState, ErrorState, LoadingState } from '../components/PageState'
 import { formatCurrency, formatDate, formatTime, isInManilaPaymentPeriod, titleCase } from '../format'
@@ -39,6 +39,7 @@ export default function ReceptionBillingPage() {
   const [message, setMessage] = useState('')
   const [formError, setFormError] = useState('')
   const [ledgerPeriod, setLedgerPeriod] = useState('today')
+  const [selectedChargeId, setSelectedChargeId] = useState(null)
 
   const load = useCallback(() => {
     setState((current) => ({ ...current, loading: true, error: null }))
@@ -47,6 +48,16 @@ export default function ReceptionBillingPage() {
       .catch((error) => setState({ loading: false, data: null, error }))
   }, [])
   useEffect(load, [load])
+  useEffect(() => {
+    if (!selectedChargeId) return undefined
+    const closeOnEscape = (event) => event.key === 'Escape' && setSelectedChargeId(null)
+    document.body.style.overflow = 'hidden'
+    window.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.body.style.overflow = ''
+      window.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [selectedChargeId])
 
   const startCheckout = (appointment) => {
     setCheckout(appointment)
@@ -134,6 +145,7 @@ export default function ReceptionBillingPage() {
 
   const awaiting = state.data?.awaitingCheckout || []
   const charges = state.data?.charges || []
+  const selectedCharge = charges.find(({ id }) => id === selectedChargeId)
   const todayPayments = state.data?.todayPayments || []
   const todayTotal = todayPayments.reduce((sum, item) => sum + item.totalCents, 0)
   const periodPayments = charges.flatMap((charge) => charge.payments
@@ -217,41 +229,43 @@ export default function ReceptionBillingPage() {
           <span className="text-xs font-extrabold uppercase tracking-wide text-brand/65">{periodPayments.length} transaction{periodPayments.length === 1 ? '' : 's'}</span>
           <strong className="text-lg text-brand">{formatCurrency(periodTotal)}</strong>
         </div>
-        {periodPayments.map(({ charge, ...payment }) => <div className={`grid gap-2 border-b border-ink/5 px-5 py-4 text-sm last:border-0 sm:grid-cols-[1.3fr_.8fr_1fr_1.2fr] sm:items-center sm:px-6 ${payment.status === 'voided' ? 'text-ink/35 line-through' : ''}`} key={payment.id}>
+        {periodPayments.map(({ charge, ...payment }) => <button className={`grid w-full gap-2 border-b border-ink/5 px-5 py-4 text-left text-sm transition last:border-0 hover:bg-mint/35 focus:outline-none focus:ring-4 focus:ring-inset focus:ring-brand/10 sm:grid-cols-[1.3fr_.8fr_1fr_1.2fr_auto] sm:items-center sm:px-6 ${payment.status === 'voided' ? 'text-ink/35' : ''}`} key={payment.id} type="button" onClick={() => { setSelectedChargeId(charge.id); setPayingCharge(null); setFormError('') }}>
           <div><p className="font-extrabold">{charge.patient.displayName}</p><p className="mt-1 text-xs text-ink/45">{charge.description} · {charge.dentistName}</p></div>
-          <div><p className="font-extrabold">{formatCurrency(payment.amountCents)}</p><p className="mt-1 text-xs text-ink/45">{titleCase(payment.method)} · {titleCase(payment.status)}</p></div>
+          <div className={payment.status === 'voided' ? 'line-through' : ''}><p className="font-extrabold">{formatCurrency(payment.amountCents)}</p><p className="mt-1 text-xs text-ink/45">{titleCase(payment.method)} · {titleCase(payment.status)}</p></div>
           <div className="text-xs text-ink/55">{formatDate(payment.receivedAt)}<br />{formatTime(payment.receivedAt)}</div>
           <div className="text-xs font-bold text-brand/70">Recorded by {payment.recordedBy}</div>
-        </div>)}
+          <span className="text-xs font-extrabold text-brand/60">View details</span>
+        </button>)}
         {!periodPayments.length && <div className="p-5 sm:p-6"><EmptyState icon={ReceiptText} title={`No payments ${ledgerPeriod === 'today' ? 'today' : 'this week'}`} message="Newly recorded payments will appear here automatically." /></div>}
       </div>
     </section>
 
-    <section aria-labelledby="ledger-heading">
-      <h2 id="ledger-heading" className="text-xl font-extrabold">Patient balances & payment history</h2>
-      <div className="mt-5 space-y-4">
-        {charges.map((charge) => <article className="rounded-3xl bg-white p-5 soft-shadow sm:p-6" key={charge.id}>
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2"><h3 className="font-extrabold">{charge.patient.displayName}</h3><span className="rounded-full bg-cream px-2.5 py-1 text-[10px] font-extrabold uppercase text-ink/55">{titleCase(charge.status)}</span></div>
-              <p className="mt-1 text-sm text-ink/50">{charge.description} · {charge.dentistName} · {recordLabel(charge.recordNumber)}</p>
-              <p className="mt-1 text-xs font-bold text-brand/65">Checkout handled by {charge.handledBy}</p>
-              <p className="mt-2 text-xs text-ink/40">Total {formatCurrency(charge.totalCents)} · Paid {formatCurrency(charge.paidCents)} · Balance <strong>{formatCurrency(charge.balanceCents)}</strong>{charge.invoiceReference ? ` · Invoice ${charge.invoiceReference}` : ''}</p>
-            </div>
-            {charge.balanceCents > 0 && <button className="rounded-xl border border-brand/15 px-4 py-2.5 text-xs font-extrabold text-brand hover:bg-mint" type="button" onClick={() => { setPayingCharge(charge.id); setAmount((charge.balanceCents / 100).toFixed(2)); setMethod('cash'); setReference(''); setFormError('') }}>Add payment</button>}
-          </div>
-          {payingCharge === charge.id && <form className="mt-5 rounded-2xl bg-cream/70 p-4" onSubmit={(event) => submitPayment(event, charge)}>
-            <PaymentFields amount={amount} setAmount={setAmount} method={method} setMethod={setMethod} reference={reference} setReference={setReference} max={charge.balanceCents / 100} />
-            <div className="mt-4 flex gap-2"><button className="rounded-xl bg-brand px-4 py-2.5 text-xs font-extrabold text-white disabled:opacity-60" disabled={busy} type="submit">Record payment</button><button className="rounded-xl px-4 py-2.5 text-xs font-extrabold text-ink/50" type="button" onClick={() => setPayingCharge(null)}>Cancel</button></div>
-          </form>}
-          {!!charge.payments.length && <div className="mt-5 border-t border-ink/5 pt-4">
-            {charge.payments.map((payment) => <div className={`flex flex-col gap-2 py-2 text-xs sm:flex-row sm:items-center ${payment.status === 'voided' ? 'text-ink/35 line-through' : 'text-ink/55'}`} key={payment.id}>
-              <ReceiptText className="shrink-0 text-brand" size={15} /><span className="font-extrabold">{formatCurrency(payment.amountCents)}</span><span>{titleCase(payment.method)}</span><span>{formatDate(payment.receivedAt)} at {formatTime(payment.receivedAt)}</span><span>Recorded by {payment.recordedBy}</span>{payment.reference && <span>Ref: {payment.reference}</span>}<span className="sm:ml-auto">{titleCase(payment.status)}</span>{payment.status === 'posted' && <button aria-label="Void payment" className="inline-flex items-center gap-1 font-extrabold text-[#9a4e22] no-underline" disabled={busy} type="button" onClick={() => voidPayment(payment)}><RotateCcw size={13} /> Void</button>}
-            </div>)}
-          </div>}
-        </article>)}
-      </div>
-      {!charges.length && <EmptyState icon={ReceiptText} title="No payment records yet" message="Completed checkouts and patient balances will appear here." />}
-    </section>
+    {selectedCharge && <div className="fixed inset-0 z-50 grid place-items-center bg-ink/45 p-4 backdrop-blur-sm" onMouseDown={(event) => event.target === event.currentTarget && setSelectedChargeId(null)}>
+      <section aria-labelledby="ledger-details-heading" aria-modal="true" className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-[30px] bg-white p-5 soft-shadow sm:p-7" role="dialog">
+        <div className="flex items-start justify-between gap-4">
+          <div><p className="text-xs font-extrabold uppercase tracking-[.16em] text-brand/60">{recordLabel(selectedCharge.recordNumber)}</p><h2 className="mt-1 text-2xl font-extrabold" id="ledger-details-heading">{selectedCharge.patient.displayName}</h2></div>
+          <button aria-label="Close payment details" className="rounded-xl bg-cream p-2.5 text-ink/55 hover:bg-mint" type="button" onClick={() => { setSelectedChargeId(null); setPayingCharge(null) }}><X size={19} /></button>
+        </div>
+        <div className="mt-5 rounded-3xl bg-mint/55 p-5">
+          <div className="flex flex-wrap items-center gap-2"><h3 className="font-extrabold">{selectedCharge.description}</h3><span className="rounded-full bg-white px-2.5 py-1 text-[10px] font-extrabold uppercase text-ink/55">{titleCase(selectedCharge.status)}</span></div>
+          <p className="mt-1 text-sm text-ink/50">{selectedCharge.dentistName} · Checkout handled by {selectedCharge.handledBy}</p>
+          <div className="mt-4 grid gap-3 sm:grid-cols-3"><div><p className="text-xs font-bold text-ink/40">Total</p><p className="mt-1 font-extrabold">{formatCurrency(selectedCharge.totalCents)}</p></div><div><p className="text-xs font-bold text-ink/40">Paid</p><p className="mt-1 font-extrabold">{formatCurrency(selectedCharge.paidCents)}</p></div><div><p className="text-xs font-bold text-ink/40">Balance</p><p className="mt-1 font-extrabold text-brand">{formatCurrency(selectedCharge.balanceCents)}</p></div></div>
+          {selectedCharge.invoiceReference && <p className="mt-3 text-xs text-ink/45">Invoice {selectedCharge.invoiceReference}</p>}
+        </div>
+        {selectedCharge.balanceCents > 0 && payingCharge !== selectedCharge.id && <button className="mt-5 rounded-xl bg-brand px-4 py-2.5 text-xs font-extrabold text-white hover:bg-brand-dark" type="button" onClick={() => { setPayingCharge(selectedCharge.id); setAmount((selectedCharge.balanceCents / 100).toFixed(2)); setMethod('cash'); setReference(''); setFormError('') }}>Add payment</button>}
+        {payingCharge === selectedCharge.id && <form className="mt-5 rounded-2xl bg-cream/70 p-4" onSubmit={(event) => submitPayment(event, selectedCharge)}>
+          <PaymentFields amount={amount} setAmount={setAmount} method={method} setMethod={setMethod} reference={reference} setReference={setReference} max={selectedCharge.balanceCents / 100} />
+          {formError && <p className="mt-3 text-sm text-[#914b22]" role="alert">{formError}</p>}
+          <div className="mt-4 flex gap-2"><button className="rounded-xl bg-brand px-4 py-2.5 text-xs font-extrabold text-white disabled:opacity-60" disabled={busy} type="submit">Record payment</button><button className="rounded-xl px-4 py-2.5 text-xs font-extrabold text-ink/50" type="button" onClick={() => setPayingCharge(null)}>Cancel</button></div>
+        </form>}
+        <div className="mt-6 border-t border-ink/5 pt-5">
+          <h3 className="font-extrabold">Payment history</h3>
+          {selectedCharge.payments.map((payment) => <div className={`flex flex-col gap-2 border-b border-ink/5 py-3 text-xs last:border-0 sm:flex-row sm:items-center ${payment.status === 'voided' ? 'text-ink/35 line-through' : 'text-ink/55'}`} key={payment.id}>
+            <ReceiptText className="shrink-0 text-brand" size={15} /><span className="font-extrabold">{formatCurrency(payment.amountCents)}</span><span>{titleCase(payment.method)}</span><span>{formatDate(payment.receivedAt)} at {formatTime(payment.receivedAt)}</span><span>Recorded by {payment.recordedBy}</span>{payment.reference && <span>Ref: {payment.reference}</span>}<span className="sm:ml-auto">{titleCase(payment.status)}</span>{payment.status === 'posted' && <button aria-label="Void payment" className="inline-flex items-center gap-1 font-extrabold text-[#9a4e22] no-underline" disabled={busy} type="button" onClick={() => voidPayment(payment)}><RotateCcw size={13} /> Void</button>}
+          </div>)}
+          {!selectedCharge.payments.length && <p className="mt-3 text-sm text-ink/45">No payments have been recorded yet.</p>}
+        </div>
+      </section>
+    </div>}
   </>
 }
