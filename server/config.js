@@ -25,8 +25,14 @@ export function loadConfig(env = process.env) {
     'PUBLIC_ORIGIN',
     errors,
   )
-  const supabaseUrlValue = env.SUPABASE_URL?.trim()
-  const supabasePublishableKey = env.SUPABASE_PUBLISHABLE_KEY?.trim()
+  // ponytail: production defaults keep Coolify setup from disabling staff login;
+  // override them with environment variables when deploying another project.
+  const supabaseUrlValue = env.SUPABASE_URL?.trim() || (
+    nodeEnv === 'production' ? 'https://csfhvyayuuvgtrbpnldq.supabase.co' : undefined
+  )
+  const supabasePublishableKey = env.SUPABASE_PUBLISHABLE_KEY?.trim() || (
+    nodeEnv === 'production' ? 'sb_publishable_k8HnlMHTyeyY07HhOSPyPQ_aGHIvuG4' : undefined
+  )
 
   if (!['development', 'test', 'production'].includes(nodeEnv)) {
     errors.push('NODE_ENV must be development, test, or production')
