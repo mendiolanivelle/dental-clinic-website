@@ -1,9 +1,80 @@
 import { useState } from 'react'
 import { useLocation } from 'react-router-dom'
-import { ArrowRight, IdCard, LockKeyhole, Phone, UserRound } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Clock3, IdCard, LockKeyhole, Phone, Sparkles, UserRound } from 'lucide-react'
 import { api } from '../api'
 import AuthLayout from '../components/AuthLayout'
 import ClinicPhoneLink from '../components/ClinicPhoneLink'
+
+const services = [
+  {
+    name: 'Dental check-up',
+    description: 'A complete oral exam to keep your smile healthy and catch concerns early.',
+    details: '30–45 minutes · Consultation',
+  },
+  {
+    name: 'Professional cleaning',
+    description: 'A gentle cleaning that removes plaque and helps protect your teeth and gums.',
+    details: '45–60 minutes · Preventive care',
+  },
+  {
+    name: 'Tooth filling',
+    description: 'Restore a damaged tooth and make everyday eating comfortable again.',
+    details: '30–60 minutes · Restorative care',
+  },
+  {
+    name: 'Braces adjustment',
+    description: 'Regular orthodontic visits to check progress and adjust your braces safely.',
+    details: '30–45 minutes · Orthodontics',
+  },
+  {
+    name: 'Teeth whitening',
+    description: 'Brighten your smile with a treatment plan selected for your teeth.',
+    details: '60–90 minutes · Cosmetic care',
+  },
+  {
+    name: 'Tooth extraction',
+    description: 'Comfort-focused removal when a tooth cannot be safely restored.',
+    details: '30–60 minutes · Consultation required',
+  },
+]
+
+function ServicesPanel({ onBack }) {
+  return (
+    <div>
+      <div className="mb-6 flex items-start justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2 text-brand">
+            <Sparkles size={18} />
+            <span className="text-xs font-extrabold uppercase tracking-[.16em]">Care options</span>
+          </div>
+          <h2 className="mt-2 text-2xl font-extrabold tracking-tight">Dental services</h2>
+          <p className="mt-2 text-sm leading-6 text-ink/55">Explore our services, then call the clinic to ask a question or request an appointment.</p>
+        </div>
+        <button className="inline-flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-extrabold text-brand hover:bg-mint" type="button" onClick={onBack}>
+          <ArrowLeft size={15} />
+          Login
+        </button>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        {services.map((service) => (
+          <article className="rounded-2xl border border-ink/8 bg-cream/65 p-4 transition hover:border-brand/25 hover:bg-mint/35" key={service.name}>
+            <h3 className="font-extrabold">{service.name}</h3>
+            <p className="mt-2 text-xs leading-5 text-ink/55">{service.description}</p>
+            <p className="mt-3 inline-flex items-center gap-1.5 text-[11px] font-bold text-brand/75">
+              <Clock3 size={13} />
+              {service.details}
+            </p>
+          </article>
+        ))}
+      </div>
+
+      <div className="mt-5 rounded-2xl bg-mint/65 px-4 py-3 text-xs leading-5 text-ink/60">
+        Service availability and fees depend on your dental assessment. Please contact the clinic for current pricing.
+      </div>
+    </div>
+  )
+}
 
 export default function LoginPage({ onAuthenticated }) {
   const location = useLocation()
@@ -11,6 +82,7 @@ export default function LoginPage({ onAuthenticated }) {
   const [patientNumber, setPatientNumber] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [showServices, setShowServices] = useState(false)
 
   async function handleSubmit(event) {
     event.preventDefault()
@@ -41,9 +113,15 @@ export default function LoginPage({ onAuthenticated }) {
 
   return (
     <AuthLayout
-      title="Welcome back"
-      description="Enter the details provided by your clinic to securely view your dental care information."
+      title={showServices ? 'Find the right care for your smile' : 'Welcome back'}
+      description={showServices ? 'Browse our most requested dental services before you sign in.' : 'Enter the details provided by your clinic to securely view your dental care information.'}
+      onServicesClick={() => setShowServices((visible) => !visible)}
+      servicesActive={showServices}
     >
+      {showServices ? (
+        <ServicesPanel onBack={() => setShowServices(false)} />
+      ) : (
+        <>
       {location.state?.sessionExpired && (
         <div className="mb-5 rounded-2xl bg-[#fff4e9] px-4 py-3 text-sm leading-6 text-[#8b4d21]" role="status">
           Your session expired to keep your records private. Please sign in again.
@@ -129,6 +207,8 @@ export default function LoginPage({ onAuthenticated }) {
           Call the clinic
         </ClinicPhoneLink>
       </div>
+        </>
+      )}
     </AuthLayout>
   )
 }
