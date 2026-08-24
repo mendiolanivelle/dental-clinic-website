@@ -574,11 +574,11 @@ export function createStore(db) {
     async createReceptionPatient({
       displayName,
       normalizedName,
-      patientNumber,
       phoneE164,
       now,
     }) {
       return db.transaction(async (client) => {
+        await client.query(`SELECT pg_advisory_xact_lock(hashtext('dental_portal.patient_number'))`)
         const existing = await client.query(
           `SELECT id, display_name, patient_number, phone_e164
            FROM patients
@@ -589,6 +589,13 @@ export function createStore(db) {
         if (existing.rowCount) return { outcome: 'already_exists' }
 
         try {
+          const nextNumber = await client.query(
+            `SELECT lpad((coalesce(max(
+               CASE WHEN patient_number ~ '^[0-9]+$' THEN patient_number::bigint END
+             ), 0) + 1)::text, 5, '0') AS patient_number
+             FROM patients`,
+          )
+          const patientNumber = nextNumber.rows[0].patient_number
           const result = await client.query(
             `INSERT INTO patients (
                patient_number, display_name, normalized_name, phone_e164,

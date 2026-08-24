@@ -2,7 +2,6 @@ import {
   SESSION_COOKIE,
   STAFF_SESSION_COOKIE,
   addHours,
-  createPatientNumber,
   createSessionToken,
   ipDigest,
   normalizeName,
@@ -278,7 +277,6 @@ export default async function staffRoutes(
         const result = await store.createReceptionPatient({
           displayName,
           normalizedName,
-          patientNumber: createPatientNumber(randomBytes),
           phoneE164,
           now: now(),
         })

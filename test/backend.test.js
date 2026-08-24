@@ -284,7 +284,7 @@ class MemoryStore {
     const patient = {
       id: '10000000-0000-4000-8000-000000000003',
       displayName: input.displayName,
-      patientNumber: input.patientNumber,
+      patientNumber: '00001',
       phone: input.phoneE164,
       enabled: true,
     }
@@ -680,7 +680,7 @@ test('reception staff use a separate protected session and can confirm booking r
       payload: { displayName: 'New Patient', phone: '+639123456789' },
     })
     assert.equal(createdPatient.statusCode, 201)
-    assert.match(createdPatient.json().patient.patientNumber, /^PT-[A-F0-9]{12}$/)
+    assert.match(createdPatient.json().patient.patientNumber, /^\d{5}$/)
     assert.equal(createdPatient.json().patient.displayName, 'New Patient')
 
     const confirmed = await staffApp.inject({

@@ -85,7 +85,7 @@ export default function ReceptionPatientsPage() {
           <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-white text-brand"><UserPlus size={20} /></div>
           <div>
             <h2 className="font-extrabold">Create patient account</h2>
-            <p className="mt-1 text-sm leading-6 text-ink/55">A secure portal ID will be generated automatically after you save this patient.</p>
+            <p className="mt-1 text-sm leading-6 text-ink/55">A five-digit patient ID will be assigned automatically after you save this patient.</p>
           </div>
         </div>
         <div className="mt-5 grid gap-4 sm:grid-cols-2">

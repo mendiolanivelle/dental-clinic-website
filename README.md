@@ -69,8 +69,9 @@ Do not share reception accounts. Disable `active` when an employee leaves.
 
 From the reception portal, search the patient’s name first. If no match exists,
 choose **Create patient account**, enter the full name and optional phone number,
-and give the patient the generated portal ID. IDs are random opaque values such
-as `PT-4F8A2C19D0B1`; they are intentionally not sequential or guessable.
+and give the patient the next five-digit portal ID, such as `00001`. Because the
+ID is also the patient login credential, keep it private and rely on the portal
+rate limits and audit trail to reduce guessing attempts.
 
 ## Authentication and privacy
 
