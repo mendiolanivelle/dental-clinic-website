@@ -8,6 +8,12 @@ export const normalizeName = (value) =>
 
 export const normalizePatientNumber = (value) => value.normalize('NFKC').trim().toUpperCase()
 
+export const normalizeMobileNumber = (value) => {
+  const digits = value.normalize('NFKC').replace(/[^0-9]/gu, '')
+  const local = digits.startsWith('63') ? digits.slice(2) : digits.startsWith('0') ? digits.slice(1) : digits
+  return /^9[0-9]{9}$/.test(local) ? `63${local}` : ''
+}
+
 export const hmacDigest = (pepper, value) =>
   createHmac('sha256', pepper).update(value).digest('hex')
 
@@ -31,7 +37,7 @@ export const sessionCookieOptions = Object.freeze({
 export const genericLoginError = Object.freeze({
   error: {
     code: 'INVALID_CREDENTIALS',
-    message: 'The name or patient ID is not recognized.',
+    message: 'The submitted patient details are not recognized.',
   },
 })
 

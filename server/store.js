@@ -354,6 +354,7 @@ export function createStore(db) {
     async createSessionForLogin({
       normalizedName,
       patientNumber,
+      mobileNumber,
       sessionId,
       tokenDigest,
       now,
@@ -361,16 +362,22 @@ export function createStore(db) {
       audit,
     }) {
       return db.transaction(async (client) => {
+        const localMobile = mobileNumber?.slice(2)
         const result = await client.query(
           `SELECT id, display_name, patient_number
            FROM patients
-           WHERE normalized_name = $1
-             AND patient_number = $2
-             AND portal_enabled = true
-           LIMIT 1`,
-          [normalizedName, patientNumber],
+           WHERE portal_enabled = true
+             AND (
+               ($1::text IS NOT NULL AND normalized_name = $1 AND patient_number = $2)
+               OR (
+                 $3::text IS NOT NULL
+                 AND regexp_replace(coalesce(phone_e164, ''), '[^0-9]', '', 'g') = ANY($4::text[])
+               )
+             )
+           LIMIT 2`,
+          [normalizedName, patientNumber, mobileNumber, mobileNumber ? [mobileNumber, `0${localMobile}`, localMobile] : []],
         )
-        const row = result.rows[0]
+        const row = result.rowCount === 1 ? result.rows[0] : null
 
         if (row) {
           await client.query(

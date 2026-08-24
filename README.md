@@ -1,8 +1,8 @@
 # SmileCare Dental Portal
 
 A patient portal built with React, Vite, Tailwind CSS, Fastify, and
-Supabase-hosted PostgreSQL. Patients sign in with the full name recorded by the
-clinic and their clinic-issued patient ID. They can browse the clinic service
+Supabase-hosted PostgreSQL. Patients sign in with either the full name and
+patient ID recorded by the clinic or their unique registered mobile number. They can browse the clinic service
 catalog and choose an open doctor time from the hourly appointment calendar. There
 is no patient registration, password, SMS, or one-time-code step.
 
@@ -12,7 +12,9 @@ keeps staff sessions and permissions separate from patient access. Reception can
 also complete appointment checkout, record cash or external electronic payments,
 track balances, and reference the clinic's BIR-authorized invoice.
 
-> Direct login is intentionally simple. In production, patient IDs must be
+> Direct login is intentionally simple. A mobile number is a weaker credential
+> than a private patient ID, so registered numbers must be unique and login
+> rate limits must remain strict. In production, patient IDs should also be
 > long, random, non-sequential, kept private, and replaced if disclosed. A
 > predictable chart number is not suitable as a portal credential.
 
@@ -92,8 +94,9 @@ invoice generation.
 
 ## Authentication and privacy
 
-`POST /api/auth/login` accepts only `fullName` and `patientNumber`. The server
-normalizes both fields, strictly limits failed credentials, and returns the
+`POST /api/auth/login` accepts either `fullName` plus `patientNumber`, or a
+single `mobileNumber`. The server normalizes the submitted fields, permits
+mobile login only for one exact unique patient match, strictly limits failed credentials, and returns the
 same generic error for an unknown, disabled, or mismatched account. Successful
 sign-ins and logout do not consume the failed-attempt budget.
 

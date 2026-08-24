@@ -5,6 +5,7 @@ import {
   createSessionToken,
   genericLoginError,
   ipDigest,
+  normalizeMobileNumber,
   normalizeName,
   normalizePatientNumber,
   sessionCookieOptions,
@@ -45,20 +46,34 @@ export default async function authRoutes(
     {
       schema: {
         body: {
-          type: 'object',
-          additionalProperties: false,
-          required: ['fullName', 'patientNumber'],
-          properties: {
-            fullName: { type: 'string', minLength: 1, maxLength: 160 },
-            patientNumber: { type: 'string', minLength: 4, maxLength: 40 },
-          },
+          oneOf: [
+            {
+              type: 'object',
+              additionalProperties: false,
+              required: ['fullName', 'patientNumber'],
+              properties: {
+                fullName: { type: 'string', minLength: 1, maxLength: 160 },
+                patientNumber: { type: 'string', minLength: 4, maxLength: 40 },
+              },
+            },
+            {
+              type: 'object',
+              additionalProperties: false,
+              required: ['mobileNumber'],
+              properties: {
+                mobileNumber: { type: 'string', minLength: 10, maxLength: 24 },
+              },
+            },
+          ],
         },
       },
     },
     async (request, reply) => {
-      const normalizedName = normalizeName(request.body.fullName)
-      const patientNumber = normalizePatientNumber(request.body.patientNumber)
-      if (!normalizedName || !/^[A-Z0-9-]+$/.test(patientNumber)) {
+      const usingMobile = 'mobileNumber' in request.body
+      const normalizedName = usingMobile ? null : normalizeName(request.body.fullName)
+      const patientNumber = usingMobile ? null : normalizePatientNumber(request.body.patientNumber)
+      const mobileNumber = usingMobile ? normalizeMobileNumber(request.body.mobileNumber) : null
+      if ((usingMobile && !mobileNumber) || (!usingMobile && (!normalizedName || !/^[A-Z0-9-]+$/.test(patientNumber)))) {
         return reply.code(400).send({
           error: {
             code: 'INVALID_REQUEST',
@@ -77,6 +92,7 @@ export default async function authRoutes(
       const patient = await store.createSessionForLogin({
         normalizedName,
         patientNumber,
+        mobileNumber,
         sessionId: randomUUID(),
         tokenDigest: sha256(token),
         now: currentTime,

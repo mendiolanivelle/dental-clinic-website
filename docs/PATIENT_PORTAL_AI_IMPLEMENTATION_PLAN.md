@@ -8,10 +8,10 @@ Application: SmileCare Dental Patient Portal
 
 ## 1. Objective
 
-Provide a simple patient portal where a patient enters:
+Provide a simple patient portal with two sign-in options:
 
-1. the full name stored by the clinic; and
-2. the clinic-issued patient ID.
+1. the full name stored by the clinic plus the clinic-issued patient ID; or
+2. the unique Philippine mobile number stored by the clinic.
 
 If both values match an enabled patient, open an authenticated portal session.
 There is no self-registration, password, SMS, or one-time-code flow.
@@ -30,8 +30,10 @@ not an automatic confirmation; clinic staff must review it.
 
 ## 2. Security boundary
 
-The full name is not secret. In this design, the patient ID is the private
-credential.
+The full name is not secret. The patient ID is the stronger private credential.
+A mobile number is easier to discover, so mobile login is allowed only for one
+exact normalized match and remains protected by the same strict failed-login
+rate limits, generic errors, audit trail, and opaque sessions.
 
 Production patient IDs must therefore be:
 
@@ -105,15 +107,15 @@ Fastify serves the built React application and the API from container port
 
 `/login`
 
-The form contains exactly:
+The patient form has two modes:
 
-- `fullName`
-- `patientNumber`
+- `fullName` plus `patientNumber`; or
+- `mobileNumber`.
 
 On submit:
 
-1. trim the fields;
-2. uppercase the patient ID for display and submission;
+1. trim the selected mode's fields;
+2. uppercase the patient ID or normalize the Philippine mobile number;
 3. call `POST /api/auth/login`;
 4. pass the returned patient summary to the application authentication state;
 5. redirect to `/portal`; and
@@ -161,14 +163,24 @@ Origin: https://dental.exodiagamedev.com
 }
 ```
 
+Or:
+
+```json
+{
+  "mobileNumber": "0917 123 4567"
+}
+```
+
 Validation:
 
 - reject extra properties;
 - `fullName`: string, 1 to 160 characters;
 - `patientNumber`: string, 4 to 40 characters;
 - normalize Unicode, trim, and collapse name whitespace;
-- normalize the patient ID to uppercase; and
-- permit only uppercase letters, digits, and hyphens in the normalized ID.
+- normalize the patient ID to uppercase;
+- permit only uppercase letters, digits, and hyphens in the normalized ID; and
+- alternatively accept only `mobileNumber`, normalize `09…`, `9…`, and `+63…`
+  Philippine formats, and authenticate only when exactly one enabled patient matches.
 
 Success:
 
@@ -187,7 +199,7 @@ Invalid credentials:
 {
   "error": {
     "code": "INVALID_CREDENTIALS",
-    "message": "The name or patient ID is not recognized."
+    "message": "The submitted patient details are not recognized."
   }
 }
 ```
@@ -491,7 +503,8 @@ must verify the Supabase CA and hostname. Never set
 
 The work is complete only when:
 
-- a valid full name and patient ID open the portal directly;
+- a valid full name and patient ID, or one unique registered mobile number,
+  opens the portal directly;
 - no registration, password, SMS, or one-time-code screen or dependency
   remains;
 - invalid credentials cannot create a session or reveal account existence;
