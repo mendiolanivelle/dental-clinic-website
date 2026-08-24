@@ -1,6 +1,6 @@
 # Super Admin Portal Implementation Plan
 
-Status: planning contract; implementation not started
+Status: MVP Phases 1–5 implemented; production super-admin account pending explicit owner-approved credentials
 
 Audience: coding agents, product designers, clinic owners, and maintainers
 

@@ -16,6 +16,7 @@ import healthRoutes from './routes/health.js'
 import patientRoutes from './routes/patient.js'
 import staffRoutes from './routes/staff.js'
 import dentistRoutes from './routes/dentist.js'
+import adminRoutes from './routes/admin.js'
 import { createStaffCredentialVerifier } from './staff-auth.js'
 
 const defaultStaticDirectory = fileURLToPath(new URL('../dist/', import.meta.url))
@@ -139,6 +140,7 @@ export async function buildApp({
       request.url.startsWith('/api/auth/') ||
       request.url.startsWith('/api/staff/') ||
       request.url.startsWith('/api/dentist/') ||
+      request.url.startsWith('/api/admin/') ||
       request.url === '/api/me' ||
       request.url.startsWith('/api/me/')
     ) {
@@ -166,6 +168,13 @@ export async function buildApp({
       verifyStaffCredentials || createStaffCredentialVerifier(config),
   })
   await app.register(dentistRoutes, { store, config, now })
+  await app.register(adminRoutes, {
+    store,
+    config,
+    now,
+    randomBytes: randomBytesFn,
+    randomUUID: randomUUIDFn,
+  })
 
   const hasStaticFiles = Boolean(staticDir && existsSync(path.join(staticDir, 'index.html')))
   if (hasStaticFiles) {
@@ -190,7 +199,8 @@ export async function buildApp({
         request.url.startsWith('/login') ||
         request.url.startsWith('/portal') ||
         request.url.startsWith('/reception') ||
-        request.url.startsWith('/dentist'))
+        request.url.startsWith('/dentist') ||
+        request.url.startsWith('/admin'))
     ) {
       return reply.type('text/html').sendFile('index.html')
     }

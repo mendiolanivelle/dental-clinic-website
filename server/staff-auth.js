@@ -1,9 +1,27 @@
+import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto'
+import { promisify } from 'node:util'
+
+const scryptAsync = promisify(scrypt)
+
 export class StaffAuthError extends Error {
   constructor(code, statusCode) {
     super(code)
     this.code = code
     this.statusCode = statusCode
   }
+}
+
+export async function hashStaffPassword(password, randomBytesFn = randomBytes) {
+  const salt = randomBytesFn(16).toString('base64')
+  const hash = await scryptAsync(password, salt, 64)
+  return { passwordSalt: salt, passwordHash: hash.toString('base64') }
+}
+
+export async function verifyStaffPassword(password, passwordSalt, passwordHash) {
+  const expected = Buffer.from(passwordHash, 'base64')
+  if (!passwordSalt || expected.length !== 64) return false
+  const actual = await scryptAsync(password, passwordSalt, 64)
+  return timingSafeEqual(actual, expected)
 }
 
 export function createStaffCredentialVerifier(config, fetchFn = globalThis.fetch) {

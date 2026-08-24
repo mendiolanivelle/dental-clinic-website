@@ -19,9 +19,17 @@ import ReceptionRequestsPage from './pages/ReceptionRequestsPage'
 import DentistDashboardPage from './pages/DentistDashboardPage'
 import DentistPatientsPage from './pages/DentistPatientsPage'
 import DentistPatientPage from './pages/DentistPatientPage'
+import AdminLayout from './components/AdminLayout'
+import AdminAnalyticsPage from './pages/AdminAnalyticsPage'
+import AdminTeamPage from './pages/AdminTeamPage'
+import AdminAuditPage from './pages/AdminAuditPage'
 import { patientFrom } from './portalData'
 
-const staffHome = (staff) => staff?.role === 'dentist' ? '/dentist' : '/reception'
+const staffHome = (staff) => ({
+  dentist: '/dentist',
+  receptionist: '/reception',
+  super_admin: '/admin',
+})[staff?.role] || '/login'
 
 function AppLoading() {
   return (
@@ -146,7 +154,7 @@ export default function App() {
       </Route>
       <Route
         path="/reception"
-        element={authenticated && auth.kind === 'staff' && auth.user.role !== 'dentist'
+        element={authenticated && auth.kind === 'staff' && auth.user.role === 'receptionist'
           ? <ReceptionLayout staff={auth.user} onLogout={handleLogout} />
           : <Navigate replace state={{ sessionExpired }} to={authenticated ? home : '/login'} />}
       >
@@ -165,6 +173,21 @@ export default function App() {
         <Route index element={<DentistDashboardPage />} />
         <Route path="patients" element={<DentistPatientsPage />} />
         <Route path="patients/:id" element={<DentistPatientPage />} />
+      </Route>
+      <Route
+        path="/admin"
+        element={authenticated && auth.kind === 'staff' && auth.user.role === 'super_admin'
+          ? <AdminLayout staff={auth.user} onLogout={handleLogout} />
+          : <Navigate replace to={authenticated ? home : '/login'} />}
+      >
+        <Route index element={<AdminAnalyticsPage mode="overview" />} />
+        <Route path="sales" element={<AdminAnalyticsPage mode="sales" />} />
+        <Route path="services" element={<AdminAnalyticsPage mode="services" />} />
+        <Route path="comparisons" element={<AdminAnalyticsPage mode="comparisons" />} />
+        <Route path="doctors" element={<AdminAnalyticsPage mode="doctors" />} />
+        <Route path="team" element={<AdminTeamPage />} />
+        <Route path="meeting" element={<AdminAnalyticsPage mode="meeting" />} />
+        <Route path="audit" element={<AdminAuditPage />} />
       </Route>
       <Route path="*" element={<Navigate replace to={authenticated ? home : '/login'} />} />
     </Routes>

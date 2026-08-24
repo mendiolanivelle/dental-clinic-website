@@ -97,6 +97,10 @@ test('the backend role stays least-privilege and the forward migration removes O
     new URL('../migrations/014_staff_name_login.sql', import.meta.url),
     'utf8',
   )
+  const superAdminSql = await readFile(
+    new URL('../migrations/015_super_admin_portal.sql', import.meta.url),
+    'utf8',
+  )
   const compact = securitySql.replace(/\s+/g, ' ')
 
   assert.doesNotMatch(securitySql, /\bDELETE\b/)
@@ -171,6 +175,11 @@ test('the backend role stays least-privilege and the forward migration removes O
   assert.match(staffNameLoginSql, /ADD COLUMN normalized_name text/i)
   assert.match(staffNameLoginSql, /CREATE UNIQUE INDEX staff_profiles_normalized_name_unique_idx/i)
   assert.doesNotMatch(staffNameLoginSql, /\bDELETE\b/i)
+  assert.match(superAdminSql, /role IN \('receptionist', 'dentist', 'super_admin'\)/i)
+  assert.match(superAdminSql, /ADD COLUMN password_hash text/i)
+  assert.match(superAdminSql, /GRANT INSERT \([\s\S]*ON dental_portal\.staff_profiles TO dental_portal_backend/i)
+  assert.doesNotMatch(superAdminSql, /GRANT[^;]*\b(?:anon|authenticated|service_role)\b/i)
+  assert.doesNotMatch(superAdminSql, /\bDELETE\b/i)
 })
 
 test('production permits Supabase direct/session connections and rejects other hosts or transaction pooling', () => {

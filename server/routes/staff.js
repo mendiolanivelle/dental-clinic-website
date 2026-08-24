@@ -9,6 +9,7 @@ import {
   sessionCookieOptions,
   sha256,
 } from '../auth.js'
+import { verifyStaffPassword } from '../staff-auth.js'
 
 const loginError = Object.freeze({
   error: {
@@ -54,8 +55,11 @@ const paymentBody = {
 const manilaDate = (date) =>
   new Date(date.getTime() + 8 * 60 * 60_000).toISOString().slice(0, 10)
 
-const staffRoles = ['receptionist', 'dentist', 'admin']
-const receptionRoles = ['receptionist', 'admin']
+const staffRoles = ['receptionist', 'dentist', 'super_admin']
+const receptionRoles = ['receptionist']
+const invalidPasswordSalt = 'aW52YWxpZC1zdGFmZi1sb2dpbg=='
+const invalidPasswordHash = Buffer.alloc(64).toString('base64')
+const publicStaff = ({ id, displayName, role, dentistId = null }) => ({ id, displayName, role, dentistId })
 
 export default async function staffRoutes(
   app,
@@ -117,10 +121,22 @@ export default async function staffRoutes(
       let identity
       try {
         const staffLogin = await store.findActiveStaffLogin(normalizeName(request.body.fullName))
-        identity = await verifyStaffCredentials({
-          email: staffLogin?.email || 'unknown-staff@invalid.local',
-          password: request.body.password,
-        })
+        if (staffLogin?.passwordHash) {
+          const valid = await verifyStaffPassword(
+            request.body.password,
+            staffLogin.passwordSalt,
+            staffLogin.passwordHash,
+          )
+          identity = valid ? { authUserId: staffLogin.authUserId } : null
+        } else if (staffLogin) {
+          identity = await verifyStaffCredentials({
+            email: staffLogin.email,
+            password: request.body.password,
+          })
+        } else {
+          await verifyStaffPassword(request.body.password, invalidPasswordSalt, invalidPasswordHash)
+          identity = null
+        }
       } catch (error) {
         if (error.statusCode === 429) return reply.code(429).send(loginError)
         if (error.statusCode === 503) return reply.code(503).send(unavailableError)
@@ -161,7 +177,7 @@ export default async function staffRoutes(
         ...sessionCookieOptions,
         maxAge: config.sessionAbsoluteHours * 60 * 60,
       })
-      return { staff }
+      return { staff: publicStaff(staff) }
     },
   )
 
@@ -174,7 +190,7 @@ export default async function staffRoutes(
 
   app.get('/api/staff/me', { preHandler: app.authenticateStaff }, async (request) => {
     await audit(request, 'staff.profile_viewed')
-    return { staff: request.staff }
+    return { staff: publicStaff(request.staff) }
   })
 
   app.get('/api/staff/dashboard', { preHandler: requireReception }, async (request) => {

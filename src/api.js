@@ -144,4 +144,12 @@ export const api = {
       method: 'POST',
       body: json(details),
     }),
+  getAdminAnalytics: (section, query = '') => request(`/api/admin/${section}${query ? `?${query}` : ''}`),
+  getAdminTeam: () => request('/api/admin/team'),
+  createAdminDentist: (details) => request('/api/admin/team/dentists', { method: 'POST', body: json(details) }),
+  createAdminReceptionist: (details) => request('/api/admin/team/receptionists', { method: 'POST', body: json(details) }),
+  setAdminStaffActive: (id, active) => request(`/api/admin/team/${id}/${active ? 'reactivate' : 'deactivate'}`, { method: 'POST' }),
+  resetAdminStaffPassword: (id, password) => request(`/api/admin/team/${id}/reset-password`, { method: 'POST', body: json({ password }) }),
+  revokeAdminStaffSessions: (id) => request(`/api/admin/team/${id}/revoke-sessions`, { method: 'POST' }),
+  getAdminAudit: () => request('/api/admin/audit'),
 }

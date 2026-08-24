@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { buildApp } from '../server/app.js'
 import { normalizeName, normalizePatientNumber, normalizePhone, sha256 } from '../server/auth.js'
 import { loadConfig } from '../server/config.js'
+import { hashStaffPassword } from '../server/staff-auth.js'
 
 const config = {
   nodeEnv: 'test',
@@ -34,6 +35,7 @@ class MemoryStore {
       dentistId: null,
       active: true,
     }
+    this.staffAccounts = [this.staff]
     this.otherPatientId = '10000000-0000-4000-8000-000000000002'
     this.dentist = {
       id: '20000000-0000-4000-8000-000000000001',
@@ -206,7 +208,12 @@ class MemoryStore {
 
   async findActiveStaffLogin(normalizedName) {
     return this.staff.active && normalizedName === normalizeName(this.staff.displayName)
-      ? { email: this.staff.email }
+      ? {
+          email: this.staff.email,
+          authUserId: this.staff.authUserId,
+          passwordSalt: this.staff.passwordSalt,
+          passwordHash: this.staff.passwordHash,
+        }
       : null
   }
 
@@ -268,6 +275,63 @@ class MemoryStore {
       todayAppointments: [],
       todayRequests: [],
     }
+  }
+
+  async getAdminAnalytics({ from, comparison }) {
+    const metrics = {
+      grossBilledCents: 120000, discountsCents: 5000, netBilledCents: 115000,
+      cashCollectedCents: 100000, outstandingCents: 15000, completedVisits: 4,
+      averageBilledCents: 28750, collectionRate: 0.87, cancelledVisits: 1,
+      noShowVisits: 0, cancellationRate: 0.2, noShowRate: 0,
+      newPatientProfiles: 2, scheduledFutureVisits: 3, dataPoints: 5,
+    }
+    return {
+      metrics,
+      comparisonMetrics: comparison ? { ...metrics, netBilledCents: 100000, dataPoints: 4 } : null,
+      comparisonAvailable: Boolean(comparison),
+      trend: [{ date: from, completedVisits: 4, netBilledCents: 115000, cashCollectedCents: 100000 }],
+      comparisonTrend: [],
+      services: [{ id: this.services[0].id, name: 'Cleaning', completedVisits: 4, serviceMix: 1, netBilledCents: 115000, averageBilledCents: 28750 }],
+      doctors: [{ id: this.dentist.id, displayName: this.dentist.displayName, specialty: null, active: true, completedVisits: 4, upcomingVisits: 3, cancelledVisits: 1, noShowVisits: 0, netBilledCents: 115000 }],
+      paymentMethods: [{ method: 'cash', amountCents: 100000 }],
+      aging: { currentCents: 15000, days31_60Cents: 0, days61_90Cents: 0, over90Cents: 0 },
+    }
+  }
+
+  async listAdminStaff() {
+    return this.staffAccounts.map(({ email: _email, authUserId: _authUserId, ...staff }) => ({ ...staff, createdAt: currentTime.toISOString(), lastLoginAt: null }))
+  }
+
+  async createAdminStaff(input) {
+    if (this.staffAccounts.some((staff) => normalizeName(staff.displayName) === input.normalizedName)) return { outcome: 'already_exists' }
+    const staff = {
+      id: '80000000-0000-4000-8000-000000000002', authUserId: input.authUserId,
+      displayName: input.displayName, email: input.email, role: input.role,
+      dentistId: input.role === 'dentist' ? '20000000-0000-4000-8000-000000000003' : null,
+      active: true, specialty: input.specialty, createdAt: input.now.toISOString(), lastLoginAt: null,
+    }
+    this.staffAccounts.push(staff)
+    const { email: _email, authUserId: _authUserId, ...safe } = staff
+    return { outcome: 'created', staff: safe }
+  }
+
+  async setAdminStaffActive(id, active) {
+    const staff = this.staffAccounts.find((item) => item.id === id)
+    if (!staff) return null
+    staff.active = active
+    return staff
+  }
+
+  async resetAdminStaffPassword(id) {
+    return this.staffAccounts.some((item) => item.id === id)
+  }
+
+  async revokeAdminStaffSessions(id) {
+    return this.staffAccounts.some((item) => item.id === id)
+  }
+
+  async listAdminAudit() {
+    return this.audits.filter(({ action }) => action.startsWith('admin.'))
   }
 
   async getDentistDashboard(dentistId) {
@@ -1375,6 +1439,66 @@ test('dentist staff can restore their staff session but cannot use reception end
   }
 })
 
+test('super admins alone can view aggregate analytics and provision staff without exposing internal email', async () => {
+  const adminStore = new MemoryStore()
+  adminStore.staff.role = 'super_admin'
+  adminStore.staff.displayName = 'Clinic Owner'
+  Object.assign(adminStore.staff, await hashStaffPassword('correct-password', () => Buffer.alloc(16, 4)))
+  const adminApp = await buildApp({
+    config,
+    store: adminStore,
+    now: () => new Date('2030-01-15T04:00:00.000Z'),
+    randomBytesFn: () => Buffer.alloc(32, 9),
+    randomUUIDFn: nextUuid,
+    staticDir: false,
+    logger: false,
+    verifyStaffCredentials: async () => { throw new Error('Local staff password should not use Supabase Auth') },
+  })
+  await adminApp.ready()
+  try {
+    const login = await adminApp.inject({
+      method: 'POST', url: '/api/staff/auth/login',
+      headers: { origin: config.publicOrigin },
+      payload: { fullName: 'clinic owner', password: 'correct-password' },
+    })
+    assert.equal(login.statusCode, 200)
+    assert.equal(login.json().staff.role, 'super_admin')
+    assert.equal('email' in login.json().staff, false)
+    const cookie = login.headers['set-cookie'].split(';')[0]
+
+    const overview = await adminApp.inject({
+      url: '/api/admin/overview?from=2030-01-01&to=2030-01-15&compare=previous_period',
+      headers: { cookie },
+    })
+    assert.equal(overview.statusCode, 200)
+    assert.equal(overview.json().metrics.cashCollectedCents, 100000)
+    assert.equal(overview.json().comparisonAvailable, true)
+    assert.doesNotMatch(overview.body, /patientName|phone|prescription|medical/i)
+
+    const weakPassword = await adminApp.inject({
+      method: 'POST', url: '/api/admin/team/receptionists',
+      headers: { origin: config.publicOrigin, cookie },
+      payload: { displayName: 'New Reception', password: 'too-short' },
+    })
+    assert.equal(weakPassword.statusCode, 400)
+
+    const created = await adminApp.inject({
+      method: 'POST', url: '/api/admin/team/receptionists',
+      headers: { origin: config.publicOrigin, cookie },
+      payload: { displayName: 'New Reception', password: 'temporary-123' },
+    })
+    assert.equal(created.statusCode, 201)
+    assert.equal(created.json().staff.role, 'receptionist')
+    assert.equal('email' in created.json().staff, false)
+
+    adminStore.staff.role = 'receptionist'
+    const forbidden = await adminApp.inject({ url: '/api/admin/overview', headers: { cookie } })
+    assert.equal(forbidden.statusCode, 403)
+  } finally {
+    await adminApp.close()
+  }
+})
+
 test('patient endpoints require authentication and enforce patient ownership and publication', async () => {
   const unauthenticated = await app.inject({ url: '/api/me/appointments' })
   assert.equal(unauthenticated.statusCode, 401)
@@ -1563,6 +1687,10 @@ test('SPA deep links return the React application while unknown API routes stay 
     const dentistLink = await staticApp.inject({ url: '/dentist' })
     assert.equal(dentistLink.statusCode, 200)
     assert.match(dentistLink.body, /id="root"/)
+
+    const adminLink = await staticApp.inject({ url: '/admin/comparisons' })
+    assert.equal(adminLink.statusCode, 200)
+    assert.match(adminLink.body, /id="root"/)
 
     const missingApi = await staticApp.inject({ url: '/api/does-not-exist' })
     assert.equal(missingApi.statusCode, 404)

@@ -61,7 +61,6 @@ const availabilitySlotFromRow = (row) => ({
 const staffFromRow = (row) => ({
   id: row.id,
   displayName: row.display_name,
-  email: row.email,
   role: row.role,
   dentistId: row.dentist_id,
 })
@@ -105,6 +104,42 @@ const followUpFromRow = (row) => ({
   status: row.status,
   createdAt: row.created_at,
 })
+
+const adminStaffFromRow = (row) => ({
+  id: row.id,
+  displayName: row.display_name,
+  role: row.role,
+  active: row.active,
+  dentistId: row.dentist_id,
+  dentistName: row.dentist_name || null,
+  specialty: row.specialty || null,
+  createdAt: row.created_at,
+  lastLoginAt: row.last_login_at,
+})
+
+const adminMetricsFromRow = (row) => {
+  const netBilledCents = Number(row.net_billed_cents || 0)
+  const completedChargedVisits = Number(row.completed_charged_visits || 0)
+  const cohortPaidCents = Number(row.cohort_paid_cents || 0)
+  const finalizedVisits = Number(row.finalized_visits || 0)
+  return {
+    grossBilledCents: Number(row.gross_billed_cents || 0),
+    discountsCents: Number(row.discounts_cents || 0),
+    netBilledCents,
+    cashCollectedCents: Number(row.cash_collected_cents || 0),
+    outstandingCents: Number(row.outstanding_cents || 0),
+    completedVisits: Number(row.completed_visits || 0),
+    averageBilledCents: completedChargedVisits ? Math.round(netBilledCents / completedChargedVisits) : null,
+    collectionRate: netBilledCents ? cohortPaidCents / netBilledCents : null,
+    cancelledVisits: Number(row.cancelled_visits || 0),
+    noShowVisits: Number(row.no_show_visits || 0),
+    cancellationRate: finalizedVisits ? Number(row.cancelled_visits || 0) / finalizedVisits : null,
+    noShowRate: finalizedVisits ? Number(row.no_show_visits || 0) / finalizedVisits : null,
+    newPatientProfiles: Number(row.new_patient_profiles || 0),
+    scheduledFutureVisits: Number(row.scheduled_future_visits || 0),
+    dataPoints: Number(row.data_points || 0),
+  }
+}
 
 const receptionRequestFromRow = (row) => ({
   ...appointmentRequestFromRow(row),
@@ -388,6 +423,114 @@ export function createStore(db) {
     )
   }
 
+  const loadAdminMetrics = async ({ from, to, dentistId, serviceId, now }) => {
+    const result = await db.query(
+      `WITH selected_appointments AS (
+         SELECT a.id, a.status
+         FROM appointments a
+         WHERE a.starts_at >= ($1::date AT TIME ZONE 'Asia/Manila')
+           AND a.starts_at < (($2::date + 1) AT TIME ZONE 'Asia/Manila')
+           AND ($3::uuid IS NULL OR a.dentist_id = $3)
+           AND ($4::uuid IS NULL OR a.appointment_type_id = $4)
+       ), billed AS (
+         SELECT coalesce(sum(c.subtotal_cents), 0) AS gross_billed_cents,
+                coalesce(sum(c.discount_cents), 0) AS discounts_cents,
+                coalesce(sum(c.total_cents), 0) AS net_billed_cents,
+                count(*) FILTER (WHERE a.status = 'completed') AS completed_charged_visits
+         FROM selected_appointments a
+         JOIN patient_charges c ON c.appointment_id = a.id
+       ), cohort_paid AS (
+         SELECT coalesce(sum(p.amount_cents), 0) AS cohort_paid_cents
+         FROM selected_appointments a
+         JOIN patient_charges c ON c.appointment_id = a.id
+         JOIN patient_payments p ON p.charge_id = c.id AND p.status = 'posted'
+       ), cash AS (
+         SELECT coalesce(sum(p.amount_cents), 0) AS cash_collected_cents
+         FROM patient_payments p
+         JOIN patient_charges c ON c.id = p.charge_id
+         JOIN appointments a ON a.id = c.appointment_id
+         WHERE p.status = 'posted'
+           AND p.received_at >= ($1::date AT TIME ZONE 'Asia/Manila')
+           AND p.received_at < (($2::date + 1) AT TIME ZONE 'Asia/Manila')
+           AND ($3::uuid IS NULL OR a.dentist_id = $3)
+           AND ($4::uuid IS NULL OR a.appointment_type_id = $4)
+       ), visit_counts AS (
+         SELECT count(*) FILTER (WHERE status = 'completed') AS completed_visits,
+                count(*) FILTER (WHERE status = 'cancelled') AS cancelled_visits,
+                count(*) FILTER (WHERE status = 'no_show') AS no_show_visits,
+                count(*) FILTER (WHERE status IN ('completed', 'cancelled', 'no_show')) AS finalized_visits,
+                count(*) AS appointment_points
+         FROM selected_appointments
+       ), outstanding AS (
+         SELECT coalesce(sum(greatest(c.total_cents - coalesce(paid.amount_cents, 0), 0)), 0) AS outstanding_cents
+         FROM patient_charges c
+         JOIN appointments a ON a.id = c.appointment_id
+         LEFT JOIN (
+           SELECT charge_id, sum(amount_cents) AS amount_cents
+           FROM patient_payments WHERE status = 'posted' GROUP BY charge_id
+         ) paid ON paid.charge_id = c.id
+         WHERE ($3::uuid IS NULL OR a.dentist_id = $3)
+           AND ($4::uuid IS NULL OR a.appointment_type_id = $4)
+       )
+       SELECT billed.*, cohort_paid.*, cash.*, visit_counts.*, outstanding.*,
+              (SELECT count(*) FROM patients
+               WHERE created_at >= ($1::date AT TIME ZONE 'Asia/Manila')
+                 AND created_at < (($2::date + 1) AT TIME ZONE 'Asia/Manila')) AS new_patient_profiles,
+              (SELECT count(*) FROM appointments a
+               WHERE a.starts_at > $5 AND a.status IN ('scheduled', 'confirmed')
+                 AND ($3::uuid IS NULL OR a.dentist_id = $3)
+                 AND ($4::uuid IS NULL OR a.appointment_type_id = $4)) AS scheduled_future_visits,
+              (visit_counts.appointment_points + billed.completed_charged_visits
+               + CASE WHEN cash.cash_collected_cents > 0 THEN 1 ELSE 0 END) AS data_points
+       FROM billed, cohort_paid, cash, visit_counts, outstanding`,
+      [from, to, dentistId, serviceId, now],
+    )
+    return adminMetricsFromRow(result.rows[0])
+  }
+
+  const loadAdminTrend = async ({ from, to, dentistId, serviceId }) => {
+    const result = await db.query(
+      `WITH days AS (
+         SELECT generate_series($1::date, $2::date, interval '1 day')::date AS day
+       ), visits AS (
+         SELECT (a.starts_at AT TIME ZONE 'Asia/Manila')::date AS day,
+                count(*) FILTER (WHERE a.status = 'completed') AS completed_visits,
+                coalesce(sum(c.total_cents), 0) AS net_billed_cents
+         FROM appointments a
+         LEFT JOIN patient_charges c ON c.appointment_id = a.id
+         WHERE a.starts_at >= ($1::date AT TIME ZONE 'Asia/Manila')
+           AND a.starts_at < (($2::date + 1) AT TIME ZONE 'Asia/Manila')
+           AND ($3::uuid IS NULL OR a.dentist_id = $3)
+           AND ($4::uuid IS NULL OR a.appointment_type_id = $4)
+         GROUP BY 1
+       ), cash AS (
+         SELECT (p.received_at AT TIME ZONE 'Asia/Manila')::date AS day,
+                sum(p.amount_cents) AS cash_collected_cents
+         FROM patient_payments p
+         JOIN patient_charges c ON c.id = p.charge_id
+         JOIN appointments a ON a.id = c.appointment_id
+         WHERE p.status = 'posted'
+           AND p.received_at >= ($1::date AT TIME ZONE 'Asia/Manila')
+           AND p.received_at < (($2::date + 1) AT TIME ZONE 'Asia/Manila')
+           AND ($3::uuid IS NULL OR a.dentist_id = $3)
+           AND ($4::uuid IS NULL OR a.appointment_type_id = $4)
+         GROUP BY 1
+       )
+       SELECT days.day, coalesce(visits.completed_visits, 0) AS completed_visits,
+              coalesce(visits.net_billed_cents, 0) AS net_billed_cents,
+              coalesce(cash.cash_collected_cents, 0) AS cash_collected_cents
+       FROM days LEFT JOIN visits USING (day) LEFT JOIN cash USING (day)
+       ORDER BY days.day`,
+      [from, to, dentistId, serviceId],
+    )
+    return result.rows.map((row) => ({
+      date: row.day,
+      completedVisits: Number(row.completed_visits),
+      netBilledCents: Number(row.net_billed_cents),
+      cashCollectedCents: Number(row.cash_collected_cents),
+    }))
+  }
+
   return {
     async health() {
       await db.query('SELECT 1')
@@ -493,13 +636,19 @@ export function createStore(db) {
 
     async findActiveStaffLogin(normalizedName) {
       const result = await db.query(
-        `SELECT email
+        `SELECT email, auth_user_id, password_salt, password_hash
          FROM staff_profiles
          WHERE normalized_name = $1 AND active = true
          LIMIT 1`,
         [normalizedName],
       )
-      return result.rows[0] || null
+      const row = result.rows[0]
+      return row ? {
+        email: row.email,
+        authUserId: row.auth_user_id,
+        passwordSalt: row.password_salt,
+        passwordHash: row.password_hash,
+      } : null
     },
 
     async createStaffSessionForLogin({
@@ -512,11 +661,12 @@ export function createStore(db) {
     }) {
       return db.transaction(async (client) => {
         const result = await client.query(
-          `SELECT id, display_name, email, role, dentist_id
-           FROM staff_profiles
-           WHERE auth_user_id = $1 AND active = true
-           LIMIT 1`,
-          [authUserId],
+          `UPDATE staff_profiles AS sp
+           SET last_login_at = $2
+           WHERE sp.auth_user_id = $1
+             AND sp.active = true
+           RETURNING sp.id, sp.display_name, sp.role, sp.dentist_id`,
+          [authUserId, now],
         )
         const row = result.rows[0]
         if (row) {
@@ -535,7 +685,9 @@ export function createStore(db) {
           [
             row ? 'staff' : 'anonymous',
             row?.id || null,
-            row ? 'staff.login_succeeded' : 'staff.login_failed',
+            row?.role === 'super_admin'
+              ? 'admin.login_succeeded'
+              : row ? 'staff.login_succeeded' : 'staff.login_failed',
             now,
             audit.requestId,
             audit.ipDigest,
@@ -579,6 +731,217 @@ export function createStore(db) {
     listAppointments,
     listRecords,
     getTreatmentPlan,
+
+    async getAdminAnalytics({ from, to, comparison, dentistId, serviceId, now }) {
+      const currentInput = { from, to, dentistId, serviceId, now }
+      const comparisonInput = comparison
+        ? { ...comparison, dentistId, serviceId, now }
+        : null
+      const [metrics, comparisonMetrics, trend, comparisonTrend, services, doctors, paymentMethods, aging] = await Promise.all([
+        loadAdminMetrics(currentInput),
+        comparisonInput ? loadAdminMetrics(comparisonInput) : null,
+        loadAdminTrend(currentInput),
+        comparisonInput ? loadAdminTrend(comparisonInput) : [],
+        db.query(
+          `SELECT t.id, t.name,
+                  count(*) FILTER (WHERE a.status = 'completed') AS completed_visits,
+                  coalesce(sum(c.total_cents) FILTER (WHERE a.status = 'completed'), 0) AS net_billed_cents
+           FROM appointment_types t
+           LEFT JOIN appointments a ON a.appointment_type_id = t.id
+             AND a.starts_at >= ($1::date AT TIME ZONE 'Asia/Manila')
+             AND a.starts_at < (($2::date + 1) AT TIME ZONE 'Asia/Manila')
+             AND ($3::uuid IS NULL OR a.dentist_id = $3)
+           LEFT JOIN patient_charges c ON c.appointment_id = a.id
+           WHERE ($4::uuid IS NULL OR t.id = $4)
+           GROUP BY t.id, t.name
+           ORDER BY completed_visits DESC, t.name ASC`,
+          [from, to, dentistId, serviceId],
+        ),
+        db.query(
+          `SELECT d.id, d.display_name, d.specialty, d.active,
+                  count(*) FILTER (WHERE a.status = 'completed') AS completed_visits,
+                  count(*) FILTER (WHERE a.status IN ('scheduled', 'confirmed') AND a.starts_at > $5) AS upcoming_visits,
+                  count(*) FILTER (WHERE a.status = 'cancelled') AS cancelled_visits,
+                  count(*) FILTER (WHERE a.status = 'no_show') AS no_show_visits,
+                  coalesce(sum(c.total_cents) FILTER (WHERE a.status = 'completed'), 0) AS net_billed_cents
+           FROM dentists d
+           LEFT JOIN appointments a ON a.dentist_id = d.id
+             AND a.starts_at >= ($1::date AT TIME ZONE 'Asia/Manila')
+             AND a.starts_at < (($2::date + 1) AT TIME ZONE 'Asia/Manila')
+             AND ($4::uuid IS NULL OR a.appointment_type_id = $4)
+           LEFT JOIN patient_charges c ON c.appointment_id = a.id
+           WHERE ($3::uuid IS NULL OR d.id = $3)
+           GROUP BY d.id, d.display_name, d.specialty, d.active
+           ORDER BY completed_visits DESC, d.display_name ASC`,
+          [from, to, dentistId, serviceId, now],
+        ),
+        db.query(
+          `SELECT p.method, sum(p.amount_cents) AS amount_cents
+           FROM patient_payments p
+           JOIN patient_charges c ON c.id = p.charge_id
+           JOIN appointments a ON a.id = c.appointment_id
+           WHERE p.status = 'posted'
+             AND p.received_at >= ($1::date AT TIME ZONE 'Asia/Manila')
+             AND p.received_at < (($2::date + 1) AT TIME ZONE 'Asia/Manila')
+             AND ($3::uuid IS NULL OR a.dentist_id = $3)
+             AND ($4::uuid IS NULL OR a.appointment_type_id = $4)
+           GROUP BY p.method ORDER BY amount_cents DESC`,
+          [from, to, dentistId, serviceId],
+        ),
+        db.query(
+          `WITH balances AS (
+             SELECT c.created_at,
+                    greatest(c.total_cents - coalesce(sum(p.amount_cents) FILTER (WHERE p.status = 'posted'), 0), 0) AS balance
+             FROM patient_charges c
+             JOIN appointments a ON a.id = c.appointment_id
+             LEFT JOIN patient_payments p ON p.charge_id = c.id
+             WHERE ($1::uuid IS NULL OR a.dentist_id = $1)
+               AND ($2::uuid IS NULL OR a.appointment_type_id = $2)
+             GROUP BY c.id, c.created_at, c.total_cents
+           )
+           SELECT coalesce(sum(balance) FILTER (WHERE $3::timestamptz::date - created_at::date <= 30), 0) AS current_cents,
+                  coalesce(sum(balance) FILTER (WHERE $3::timestamptz::date - created_at::date BETWEEN 31 AND 60), 0) AS days_31_60_cents,
+                  coalesce(sum(balance) FILTER (WHERE $3::timestamptz::date - created_at::date BETWEEN 61 AND 90), 0) AS days_61_90_cents,
+                  coalesce(sum(balance) FILTER (WHERE $3::timestamptz::date - created_at::date > 90), 0) AS over_90_cents
+           FROM balances WHERE balance > 0`,
+          [dentistId, serviceId, now],
+        ),
+      ])
+
+      const completedTotal = services.rows.reduce((sum, row) => sum + Number(row.completed_visits), 0)
+      return {
+        metrics,
+        comparisonMetrics,
+        comparisonAvailable: Boolean(comparisonMetrics?.dataPoints),
+        trend,
+        comparisonTrend,
+        services: services.rows.map((row) => ({
+          id: row.id,
+          name: row.name,
+          completedVisits: Number(row.completed_visits),
+          serviceMix: completedTotal ? Number(row.completed_visits) / completedTotal : 0,
+          netBilledCents: Number(row.net_billed_cents),
+          averageBilledCents: Number(row.completed_visits)
+            ? Math.round(Number(row.net_billed_cents) / Number(row.completed_visits))
+            : null,
+        })),
+        doctors: doctors.rows.map((row) => ({
+          id: row.id,
+          displayName: row.display_name,
+          specialty: row.specialty,
+          active: row.active,
+          completedVisits: Number(row.completed_visits),
+          upcomingVisits: Number(row.upcoming_visits),
+          cancelledVisits: Number(row.cancelled_visits),
+          noShowVisits: Number(row.no_show_visits),
+          netBilledCents: Number(row.net_billed_cents),
+        })),
+        paymentMethods: paymentMethods.rows.map((row) => ({ method: row.method, amountCents: Number(row.amount_cents) })),
+        aging: Object.fromEntries(Object.entries(aging.rows[0] || {}).map(([key, value]) => [key.replace(/_([a-z])/g, (_, char) => char.toUpperCase()), Number(value)])),
+      }
+    },
+
+    async listAdminStaff() {
+      const result = await db.query(
+        `SELECT s.id, s.display_name, s.role, s.active, s.dentist_id,
+                s.created_at, s.last_login_at, d.display_name AS dentist_name, d.specialty
+         FROM staff_profiles s
+         LEFT JOIN dentists d ON d.id = s.dentist_id
+         ORDER BY s.active DESC, s.display_name ASC`,
+      )
+      return result.rows.map(adminStaffFromRow)
+    },
+
+    async createAdminStaff({ authUserId, email, displayName, normalizedName, role, specialty, passwordSalt, passwordHash }) {
+      try {
+        return await db.transaction(async (client) => {
+          const existing = await client.query('SELECT 1 FROM staff_profiles WHERE normalized_name = $1', [normalizedName])
+          if (existing.rowCount) return { outcome: 'already_exists' }
+          let dentistId = null
+          if (role === 'dentist') {
+            const dentist = await client.query(
+              `INSERT INTO dentists (display_name, specialty, active)
+               VALUES ($1, $2, true) RETURNING id`,
+              [displayName, specialty],
+            )
+            dentistId = dentist.rows[0].id
+          }
+          const result = await client.query(
+            `INSERT INTO staff_profiles (
+               auth_user_id, email, display_name, normalized_name, role, active,
+               dentist_id, password_salt, password_hash
+             ) VALUES ($1, $2, $3, $4, $5, true, $6, $7, $8)
+             RETURNING id, display_name, role, active, dentist_id, created_at, last_login_at`,
+            [authUserId, email, displayName, normalizedName, role, dentistId, passwordSalt, passwordHash],
+          )
+          return { outcome: 'created', staff: adminStaffFromRow({ ...result.rows[0], dentist_name: role === 'dentist' ? displayName : null, specialty }) }
+        })
+      } catch (error) {
+        if (error.code === '23505') return { outcome: 'already_exists' }
+        throw error
+      }
+    },
+
+    async setAdminStaffActive(id, active, now) {
+      return db.transaction(async (client) => {
+        const result = await client.query(
+          `UPDATE staff_profiles SET active = $2, updated_at = $3
+           WHERE id = $1
+           RETURNING id, display_name, role, active, dentist_id, created_at, last_login_at`,
+          [id, active, now],
+        )
+        const row = result.rows[0]
+        if (!row) return null
+        if (row.dentist_id) await client.query('UPDATE dentists SET active = $2 WHERE id = $1', [row.dentist_id, active])
+        if (!active) await client.query('UPDATE staff_sessions SET revoked_at = $2 WHERE staff_id = $1 AND revoked_at IS NULL', [id, now])
+        return adminStaffFromRow(row)
+      })
+    },
+
+    async resetAdminStaffPassword(id, { passwordSalt, passwordHash }, now) {
+      return db.transaction(async (client) => {
+        const result = await client.query(
+          `UPDATE staff_profiles SET password_salt = $2, password_hash = $3, updated_at = $4
+           WHERE id = $1 RETURNING id`,
+          [id, passwordSalt, passwordHash, now],
+        )
+        if (!result.rowCount) return false
+        await client.query('UPDATE staff_sessions SET revoked_at = $2 WHERE staff_id = $1 AND revoked_at IS NULL', [id, now])
+        return true
+      })
+    },
+
+    async revokeAdminStaffSessions(id, now) {
+      const result = await db.query(
+        `UPDATE staff_sessions SET revoked_at = $2
+         WHERE staff_id = $1 AND revoked_at IS NULL
+         RETURNING id`,
+        [id, now],
+      )
+      if (result.rowCount) return true
+      const exists = await db.query('SELECT 1 FROM staff_profiles WHERE id = $1', [id])
+      return Boolean(exists.rowCount)
+    },
+
+    async listAdminAudit(limit) {
+      const result = await db.query(
+        `SELECT e.id, e.action, e.object_type, e.object_id, e.occurred_at,
+                s.display_name AS actor_name
+         FROM audit_events e
+         LEFT JOIN staff_profiles s ON s.id = e.actor_id AND e.actor_type = 'staff'
+         WHERE e.action LIKE 'admin.%'
+         ORDER BY e.occurred_at DESC LIMIT $1`,
+        [limit],
+      )
+      return result.rows.map((row) => ({
+        id: row.id,
+        action: row.action,
+        objectType: row.object_type,
+        objectId: row.object_id,
+        occurredAt: row.occurred_at,
+        actorName: row.actor_name || 'System',
+      }))
+    },
 
     async updatePatientPhone(patientId, phoneE164, now) {
       const result = await db.query(
