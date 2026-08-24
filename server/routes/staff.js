@@ -241,6 +241,41 @@ export default async function staffRoutes(
     },
   )
 
+  app.patch(
+    '/api/staff/appointments/:id/schedule',
+    {
+      preHandler: requireReception,
+      schema: {
+        params: idParams,
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['startsAt'],
+          properties: { startsAt: { type: 'string', format: 'date-time' } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const result = await store.rescheduleReceptionAppointment({
+        id: request.params.id,
+        startsAt: request.body.startsAt,
+        now: now(),
+      })
+      if (result.outcome === 'not_found') {
+        return reply.code(404).send({
+          error: { code: 'NOT_FOUND', message: 'That appointment can no longer be rescheduled.' },
+        })
+      }
+      if (result.outcome === 'slot_unavailable') {
+        return reply.code(409).send({
+          error: { code: 'SLOT_UNAVAILABLE', message: 'That time is unavailable. Choose another hourly slot.' },
+        })
+      }
+      await audit(request, 'staff.appointment_rescheduled', 'appointment', request.params.id)
+      return reply.code(204).send()
+    },
+  )
+
   app.get('/api/staff/billing', { preHandler: requireReception }, async (request) => {
     const billing = await store.listReceptionBilling(manilaDate(now()))
     await audit(request, 'staff.billing_viewed')

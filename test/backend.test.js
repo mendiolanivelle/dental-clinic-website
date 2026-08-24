@@ -278,6 +278,27 @@ class MemoryStore {
     }
   }
 
+  async rescheduleReceptionAppointment({ id, startsAt, now }) {
+    const appointment = this.appointments.find(
+      (item) => item.id === id && ['scheduled', 'confirmed'].includes(item.status),
+    )
+    if (!appointment) return { outcome: 'not_found' }
+    const start = new Date(startsAt)
+    const end = new Date(start.getTime() + 60 * 60_000)
+    const local = new Date(start.getTime() + 8 * 60 * 60_000)
+    const valid = start > now && local.getUTCDay() >= 1 && local.getUTCDay() <= 6 &&
+      local.getUTCHours() >= 9 && local.getUTCHours() < 17 &&
+      local.getUTCMinutes() === 0 && local.getUTCSeconds() === 0
+    const overlaps = this.appointments.some((item) =>
+      item.id !== id && item.dentistId === appointment.dentistId &&
+      ['scheduled', 'confirmed'].includes(item.status) &&
+      new Date(item.startsAt) < end && new Date(item.endsAt) > start)
+    if (!valid || overlaps) return { outcome: 'slot_unavailable' }
+    appointment.startsAt = start.toISOString()
+    appointment.endsAt = end.toISOString()
+    return { outcome: 'updated' }
+  }
+
   async listReceptionBilling(date) {
     return {
       awaitingCheckout: this.appointments
@@ -901,6 +922,24 @@ test('reception staff use a separate protected session and can confirm booking r
     assert.equal(billing.statusCode, 200)
     assert.equal(billing.json().awaitingCheckout.length, 1)
     assert.equal(billing.json().awaitingCheckout[0].id, '30000000-0000-4000-8000-000000000001')
+
+    const conflictingReschedule = await staffApp.inject({
+      method: 'PATCH',
+      url: '/api/staff/appointments/30000000-0000-4000-8000-000000000003/schedule',
+      headers: { origin: config.publicOrigin, cookie },
+      payload: { startsAt: '2030-01-01T02:00:00.000Z' },
+    })
+    assert.equal(conflictingReschedule.statusCode, 409)
+
+    const rescheduled = await staffApp.inject({
+      method: 'PATCH',
+      url: '/api/staff/appointments/30000000-0000-4000-8000-000000000003/schedule',
+      headers: { origin: config.publicOrigin, cookie },
+      payload: { startsAt: '2030-01-03T02:00:00.000Z' },
+    })
+    assert.equal(rescheduled.statusCode, 204)
+    assert.equal(staffStore.appointments.at(-1).startsAt, '2030-01-03T02:00:00.000Z')
+    assert.equal(staffStore.appointments.at(-1).endsAt, '2030-01-03T03:00:00.000Z')
 
     const checkoutWithoutConfirmation = await staffApp.inject({
       method: 'POST',

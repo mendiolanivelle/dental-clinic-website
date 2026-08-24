@@ -93,6 +93,10 @@ export const api = {
   }),
   getReceptionCalendar: (date) =>
     request(`/api/staff/calendar?date=${encodeURIComponent(date)}`),
+  rescheduleReceptionAppointment: (id, startsAt) => request(`/api/staff/appointments/${id}/schedule`, {
+    method: 'PATCH',
+    body: json({ startsAt }),
+  }),
   getReceptionBilling: () => request('/api/staff/billing'),
   checkoutAppointment: (id, details) => request(`/api/staff/appointments/${id}/checkout`, {
     method: 'POST',

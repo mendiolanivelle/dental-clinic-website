@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
+  CalendarClock,
   CalendarDays,
   ChevronLeft,
   ChevronRight,
@@ -19,6 +20,11 @@ const shiftDate = (date, days) => {
   value.setUTCDate(value.getUTCDate() + days)
   return value.toISOString().slice(0, 10)
 }
+const hourlyTimes = Array.from({ length: 8 }, (_, index) => `${String(index + 9).padStart(2, '0')}:00`)
+const manilaDateTime = (value) => {
+  const local = new Date(new Date(value).getTime() + 8 * 60 * 60_000).toISOString()
+  return { date: local.slice(0, 10), time: local.slice(11, 16) }
+}
 
 const dayItems = (day) => [
   ...(day.appointments || []).map((item) => ({
@@ -35,7 +41,13 @@ const dayItems = (day) => [
   })),
 ].sort((a, b) => String(a.time).localeCompare(String(b.time)))
 
-function BookingDetails({ booking, close }) {
+function BookingDetails({ booking, close, onRescheduled }) {
+  const initialSchedule = manilaDateTime(booking.time)
+  const [editing, setEditing] = useState(false)
+  const [date, setDate] = useState(initialSchedule.date)
+  const [time, setTime] = useState(initialSchedule.time)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
   useEffect(() => {
     const onKeyDown = (event) => event.key === 'Escape' && close()
     document.body.style.overflow = 'hidden'
@@ -48,6 +60,21 @@ function BookingDetails({ booking, close }) {
 
   const serviceName = booking.typeName || booking.serviceName
   const endTime = booking.endsAt || booking.requestedEndAt
+  const canReschedule = booking.kind === 'appointment' && ['scheduled', 'confirmed'].includes(booking.status)
+
+  const submitReschedule = async (event) => {
+    event.preventDefault()
+    setBusy(true)
+    setError('')
+    try {
+      await api.rescheduleReceptionAppointment(booking.id, new Date(`${date}T${time}:00+08:00`).toISOString())
+      await onRescheduled()
+    } catch (requestError) {
+      setError(requestError.message || 'The appointment could not be rescheduled.')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   return <div className="fixed inset-0 z-50 grid place-items-center bg-ink/40 p-4 backdrop-blur-sm" onMouseDown={(event) => event.target === event.currentTarget && close()}>
     <section aria-labelledby="booking-details-title" aria-modal="true" className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-[30px] bg-white p-6 soft-shadow sm:p-8" role="dialog">
@@ -75,6 +102,26 @@ function BookingDetails({ booking, close }) {
         {booking.patientNote && <div><p className="text-xs font-extrabold uppercase tracking-[.14em] text-ink/40">Patient note</p><p className="mt-1 text-sm leading-6 text-ink/65">{booking.patientNote}</p></div>}
         {booking.clinicNote && <div><p className="text-xs font-extrabold uppercase tracking-[.14em] text-ink/40">Clinic note</p><p className="mt-1 text-sm leading-6 text-ink/65">{booking.clinicNote}</p></div>}
       </div>}
+
+      {canReschedule && !editing && <button className="mt-6 inline-flex items-center gap-2 rounded-xl bg-brand px-4 py-2.5 text-sm font-extrabold text-white hover:bg-brand-dark" type="button" onClick={() => setEditing(true)}><CalendarClock size={17} /> Change schedule</button>}
+      {editing && <form className="mt-6 rounded-2xl bg-cream/70 p-4" onSubmit={submitReschedule}>
+        <p className="text-sm font-extrabold">Choose a new one-hour schedule</p>
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <label className="text-xs font-extrabold text-ink/55">Date
+            <input className="mt-2 w-full rounded-xl border border-ink/10 bg-white px-3 py-2.5 text-sm font-semibold text-ink" type="date" min={manilaToday()} required value={date} onChange={(event) => setDate(event.target.value)} />
+          </label>
+          <label className="text-xs font-extrabold text-ink/55">Time
+            <select className="mt-2 w-full rounded-xl border border-ink/10 bg-white px-3 py-2.5 text-sm font-semibold text-ink" required value={time} onChange={(event) => setTime(event.target.value)}>
+              {hourlyTimes.map((value) => <option key={value} value={value}>{formatTime(new Date(`2000-01-01T${value}:00+08:00`))}</option>)}
+            </select>
+          </label>
+        </div>
+        {error && <p className="mt-3 rounded-xl bg-[#fff0e7] p-3 text-sm text-[#914b22]" role="alert">{error}</p>}
+        <div className="mt-4 flex gap-2">
+          <button className="rounded-xl bg-brand px-4 py-2.5 text-xs font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-50" disabled={busy || (date === initialSchedule.date && time === initialSchedule.time)} type="submit">{busy ? 'Saving…' : 'Save new schedule'}</button>
+          <button className="rounded-xl px-4 py-2.5 text-xs font-extrabold text-ink/50" disabled={busy} type="button" onClick={() => { setEditing(false); setError('') }}>Cancel</button>
+        </div>
+      </form>}
     </section>
   </div>
 }
@@ -83,6 +130,7 @@ export default function ReceptionCalendarPage() {
   const today = manilaToday()
   const [weekStart, setWeekStart] = useState(() => calendarWeek(today)[0])
   const [selected, setSelected] = useState(null)
+  const [message, setMessage] = useState('')
   const [state, setState] = useState({ loading: true, days: [], error: null })
 
   const load = useCallback(async () => {
@@ -126,6 +174,8 @@ export default function ReceptionCalendarPage() {
       {formatDate(weekStart)} – {formatDate(weekEnd)}
     </div>
 
+    {message && <p className="mb-5 rounded-2xl bg-mint p-4 text-sm font-bold text-brand" role="status">{message}</p>}
+
     {state.loading ? <LoadingState label="Loading this week’s clinic calendar…" />
       : state.error ? <ErrorState error={state.error} onRetry={load} />
         : <div className="space-y-4" aria-label="Weekly schedule">
@@ -144,6 +194,6 @@ export default function ReceptionCalendarPage() {
           </section>)}
         </div>}
 
-    {selected && <BookingDetails booking={selected} close={() => setSelected(null)} />}
+    {selected && <BookingDetails booking={selected} close={() => setSelected(null)} onRescheduled={async () => { setSelected(null); setMessage('Appointment schedule updated.'); await load() }} />}
   </>
 }

@@ -643,6 +643,81 @@ export function createStore(db) {
       }
     },
 
+    async rescheduleReceptionAppointment({ id, startsAt, now }) {
+      try {
+        return await db.transaction(async (client) => {
+          const selected = await client.query(
+            `SELECT id, patient_id, dentist_id, appointment_type_id, starts_at
+             FROM appointments
+             WHERE id = $1 AND status IN ('scheduled', 'confirmed')
+             FOR UPDATE`,
+            [id],
+          )
+          if (!selected.rowCount) return { outcome: 'not_found' }
+
+          const updated = await client.query(
+            `UPDATE appointments
+             SET starts_at = $2::timestamptz,
+                 ends_at = $2::timestamptz + interval '1 hour',
+                 updated_at = $3
+             WHERE id = $1
+               AND $2::timestamptz > $3
+               AND EXTRACT(ISODOW FROM $2::timestamptz AT TIME ZONE 'Asia/Manila') BETWEEN 1 AND 6
+               AND ($2::timestamptz AT TIME ZONE 'Asia/Manila')::time >= time '09:00'
+               AND ($2::timestamptz AT TIME ZONE 'Asia/Manila')::time < time '17:00'
+               AND EXTRACT(MINUTE FROM $2::timestamptz AT TIME ZONE 'Asia/Manila') = 0
+               AND EXTRACT(SECOND FROM $2::timestamptz AT TIME ZONE 'Asia/Manila') = 0
+               AND NOT EXISTS (
+                 SELECT 1 FROM appointments a
+                 WHERE a.id <> $1
+                   AND a.dentist_id = $4
+                   AND a.status IN ('scheduled', 'confirmed')
+                   AND a.starts_at < $2::timestamptz + interval '1 hour'
+                   AND a.ends_at > $2::timestamptz
+               )
+               AND NOT EXISTS (
+                 SELECT 1 FROM appointment_requests r
+                 WHERE r.dentist_id = $4
+                   AND r.status IN ('requested', 'confirmed')
+                   AND r.requested_start_at < $2::timestamptz + interval '1 hour'
+                   AND r.requested_end_at > $2::timestamptz
+               )
+             RETURNING id`,
+            [id, startsAt, now, selected.rows[0].dentist_id],
+          )
+          if (!updated.rowCount) return { outcome: 'slot_unavailable' }
+          await client.query(
+            `UPDATE appointment_requests
+               SET requested_start_at = $1::timestamptz,
+                   requested_end_at = $1::timestamptz + interval '1 hour',
+                   preferred_date = ($1::timestamptz AT TIME ZONE 'Asia/Manila')::date,
+                   time_preference = CASE
+                     WHEN EXTRACT(HOUR FROM $1::timestamptz AT TIME ZONE 'Asia/Manila') < 12
+                     THEN 'morning' ELSE 'afternoon'
+                   END,
+                   updated_at = $2
+               WHERE patient_id = $4
+                 AND dentist_id = $3
+                 AND appointment_type_id = $5
+                 AND requested_start_at = $6
+                 AND status = 'confirmed'`,
+            [
+              startsAt,
+              now,
+              selected.rows[0].dentist_id,
+              selected.rows[0].patient_id,
+              selected.rows[0].appointment_type_id,
+              selected.rows[0].starts_at,
+            ],
+          )
+          return { outcome: 'updated' }
+        })
+      } catch (error) {
+        if (error.code === '23505') return { outcome: 'slot_unavailable' }
+        throw error
+      }
+    },
+
     async createPatientCheckout({
       appointmentId,
       staffId,
