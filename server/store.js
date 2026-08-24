@@ -405,7 +405,7 @@ export function createStore(db) {
     }) {
       return db.transaction(async (client) => {
         const result = await client.query(
-          `SELECT id, display_name, patient_number
+          `SELECT id, display_name, patient_number, phone_e164
            FROM patients
            WHERE normalized_name = $1
              AND (
@@ -450,6 +450,7 @@ export function createStore(db) {
               id: row.id,
               displayName: row.display_name,
               patientNumber: row.patient_number,
+              phone: row.phone_e164,
             }
           : null
       })
@@ -466,7 +467,7 @@ export function createStore(db) {
            AND s.absolute_expires_at > $2
            AND s.last_seen_at >= $3
            AND p.portal_enabled = true
-         RETURNING s.id AS session_id, p.id, p.display_name, p.patient_number`,
+         RETURNING s.id AS session_id, p.id, p.display_name, p.patient_number, p.phone_e164`,
         [tokenDigest, now, idleCutoff],
       )
       const row = result.rows[0]
@@ -476,6 +477,7 @@ export function createStore(db) {
             id: row.id,
             displayName: row.display_name,
             patientNumber: row.patient_number,
+            phone: row.phone_e164,
           }
         : null
     },
@@ -566,6 +568,17 @@ export function createStore(db) {
     listAppointments,
     listRecords,
     getTreatmentPlan,
+
+    async updatePatientPhone(patientId, phoneE164, now) {
+      const result = await db.query(
+        `UPDATE patients
+         SET phone_e164 = $2, phone_verified_at = NULL, updated_at = $3
+         WHERE id = $1
+         RETURNING phone_e164`,
+        [patientId, phoneE164, now],
+      )
+      return result.rowCount ? result.rows[0].phone_e164 : null
+    },
 
     async getDentistDashboard(dentistId, date) {
       const result = await db.query(

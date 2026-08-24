@@ -112,6 +112,7 @@ export default async function authRoutes(
         patient: {
           displayName: patient.displayName,
           patientNumber: patient.patientNumber,
+          phone: patient.phone,
         },
       }
     },

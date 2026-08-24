@@ -1,4 +1,4 @@
-import { ipDigest } from '../auth.js'
+import { ipDigest, normalizePhone } from '../auth.js'
 
 const notFound = {
   error: {
@@ -58,9 +58,43 @@ export default async function patientRoutes(app, { store, config, now }) {
       patient: {
         displayName: request.patient.displayName,
         patientNumber: request.patient.patientNumber,
+        phone: request.patient.phone,
       },
     }
   })
+
+  app.patch(
+    '/api/me/profile',
+    {
+      preHandler: app.authenticate,
+      schema: {
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['phone'],
+          properties: {
+            phone: { type: 'string', minLength: 10, maxLength: 32, pattern: '^[+0-9 ()-]+$' },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const phoneDigits = normalizePhone(request.body.phone)
+      if (!phoneDigits) {
+        return reply.code(400).send({
+          error: { code: 'INVALID_PHONE', message: 'Enter a valid Philippine mobile number.' },
+        })
+      }
+      const phone = await store.updatePatientPhone(
+        request.patient.id,
+        `+${phoneDigits}`,
+        now(),
+      )
+      if (!phone) return reply.code(404).send(notFound)
+      await audited(request, 'portal.phone_updated', 'patient', request.patient.id)
+      return { patient: { ...request.patient, phone } }
+    },
+  )
 
   app.get('/api/me/dashboard', { preHandler: app.authenticate }, async (request) => {
     const dashboard = await store.getDashboard(request.patient.id, now())

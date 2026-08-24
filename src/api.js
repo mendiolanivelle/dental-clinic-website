@@ -62,6 +62,10 @@ export const api = {
     notifyUnauthorized: false,
   }),
   getMe: ({ notifyUnauthorized = true } = {}) => request('/api/me', { notifyUnauthorized }),
+  updateMyPhone: (phone) => request('/api/me/profile', {
+    method: 'PATCH',
+    body: json({ phone }),
+  }),
   getDashboard: () => request('/api/me/dashboard'),
   getServices: () => request('/api/me/services'),
   getAvailability: (date) => request(`/api/me/availability?date=${encodeURIComponent(date)}`),

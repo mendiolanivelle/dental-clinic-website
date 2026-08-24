@@ -1,11 +1,33 @@
+import { useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import { IdCard, LockKeyhole, Phone, ShieldCheck, UserRound } from 'lucide-react'
+import { api } from '../api'
 import ClinicPhoneLink, { clinicPhoneDisplay } from '../components/ClinicPhoneLink'
 
 export default function ProfilePage() {
   const { patient } = useOutletContext()
   const name = patient?.displayName || patient?.display_name || patient?.name || 'Patient'
   const patientNumber = patient?.patientNumber || patient?.patient_number || 'Not available'
+  const [phone, setPhone] = useState(patient?.phone || '')
+  const [saving, setSaving] = useState(false)
+  const [message, setMessage] = useState('')
+  const [error, setError] = useState('')
+
+  async function savePhone(event) {
+    event.preventDefault()
+    setSaving(true)
+    setMessage('')
+    setError('')
+    try {
+      const result = await api.updateMyPhone(phone.trim())
+      setPhone(result.patient.phone)
+      setMessage('Your mobile number was updated.')
+    } catch (requestError) {
+      setError(requestError.message || 'Your mobile number could not be updated.')
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return (
     <>
@@ -46,8 +68,21 @@ export default function ProfilePage() {
             </div>
           </dl>
 
+          <form className="mt-4 rounded-2xl border border-brand/10 bg-mint/40 p-4" onSubmit={savePhone}>
+            <label className="flex items-center gap-2 text-[10px] font-extrabold uppercase tracking-[.14em] text-ink/45" htmlFor="profilePhone">
+              <Phone size={14} /> Mobile number
+            </label>
+            <div className="mt-3 flex flex-col gap-3 sm:flex-row">
+              <input id="profilePhone" className="input-field" type="tel" autoComplete="tel" placeholder="0917 123 4567" value={phone} onChange={(event) => setPhone(event.target.value)} disabled={saving} required />
+              <button className="shrink-0 rounded-xl bg-brand px-5 py-3 text-sm font-extrabold text-white disabled:opacity-60" disabled={saving} type="submit">{saving ? 'Saving…' : 'Save number'}</button>
+            </div>
+            <p className="mt-2 text-xs leading-5 text-ink/45">You can use this number with your full name the next time you log in.</p>
+            {message && <p className="mt-3 text-sm font-bold text-brand" role="status">{message}</p>}
+            {error && <p className="mt-3 text-sm font-bold text-[#914b22]" role="alert">{error}</p>}
+          </form>
+
           <p className="mt-5 text-xs leading-5 text-ink/45">
-            To correct your name, mobile number, or other patient information, visit or call the clinic. Profile changes are not available online.
+            To correct your name or other patient information, visit or call the clinic.
           </p>
         </section>
 
@@ -67,7 +102,7 @@ export default function ProfilePage() {
           </section>
 
           <section className="rounded-3xl bg-[#f4dfc9] p-6">
-            <h2 className="text-lg font-extrabold">Need to update your details?</h2>
+            <h2 className="text-lg font-extrabold">Need another profile change?</h2>
             <p className="mt-2 text-xs leading-5 text-ink/55">
               Our care team will verify your identity before changing patient information.
             </p>

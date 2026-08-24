@@ -198,6 +198,12 @@ class MemoryStore {
     if (session) session.revokedAt = now
   }
 
+  async updatePatientPhone(patientId, phoneE164) {
+    if (patientId !== this.patient.id) return null
+    this.patient.phone = phoneE164
+    return phoneE164
+  }
+
   async createStaffSessionForLogin(input) {
     if (!this.staff.active || input.authUserId !== this.staff.authUserId) return null
     this.staffSessions.set(input.tokenDigest, {
@@ -808,6 +814,7 @@ test('direct login creates a hashed opaque session and logout revokes it', async
     patient: {
       displayName: 'Patricia Portal Demo',
       patientNumber: 'PT-DEMO01',
+      phone: '+639000000001',
     },
   })
   const setCookie = loggedIn.headers['set-cookie']
@@ -831,6 +838,33 @@ test('direct login creates a hashed opaque session and logout revokes it', async
   const me = await app.inject({ url: '/api/me', headers: { cookie } })
   assert.equal(me.statusCode, 200)
   assert.equal(me.headers['cache-control'], 'no-store')
+  assert.equal(me.json().patient.phone, '+639000000001')
+
+  const invalidPhone = await app.inject({
+    method: 'PATCH',
+    url: '/api/me/profile',
+    headers: { origin: config.publicOrigin, cookie },
+    payload: { phone: '12345' },
+  })
+  assert.equal(invalidPhone.statusCode, 400)
+
+  const updatedPhone = await app.inject({
+    method: 'PATCH',
+    url: '/api/me/profile',
+    headers: { origin: config.publicOrigin, cookie },
+    payload: { phone: '0917 123 4567' },
+  })
+  assert.equal(updatedPhone.statusCode, 200)
+  assert.equal(updatedPhone.json().patient.phone, '+639171234567')
+  assert.equal(store.patient.phone, '+639171234567')
+  assert.equal(store.audits.at(-1).action, 'portal.phone_updated')
+
+  await app.inject({
+    method: 'PATCH',
+    url: '/api/me/profile',
+    headers: { origin: config.publicOrigin, cookie },
+    payload: { phone: '0900 000 0001' },
+  })
 
   const logout = await app.inject({
     method: 'POST',
