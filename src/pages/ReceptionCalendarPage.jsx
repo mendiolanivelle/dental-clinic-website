@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   CalendarClock,
   CalendarDays,
-  CalendarPlus,
   ChevronLeft,
   ChevronRight,
   Clock3,
@@ -28,16 +27,10 @@ const manilaDateTime = (value) => {
   const local = new Date(new Date(value).getTime() + 8 * 60 * 60_000).toISOString()
   return { date: local.slice(0, 10), time: local.slice(11, 16) }
 }
-const nextClinicSlot = () => {
-  const now = new Date()
-  for (let offset = 0; offset < 8; offset += 1) {
-    const date = shiftDate(manilaToday(), offset)
-    if (new Date(`${date}T00:00:00Z`).getUTCDay() === 0) continue
-    const time = hourlyTimes.find((value) => new Date(`${date}T${value}:00+08:00`) > now)
-    if (time) return { date, time }
-  }
-  return { date: manilaToday(), time: '09:00' }
-}
+const clinicTimeForDate = (date) =>
+  new Date(`${date}T00:00:00Z`).getUTCDay() === 0
+    ? ''
+    : hourlyTimes.find((value) => new Date(`${date}T${value}:00+08:00`) > new Date()) || ''
 
 const dayItems = (day) => [
   ...(day.appointments || []).map((item) => ({
@@ -148,16 +141,15 @@ function BookingDetails({ booking, close, dentists, onRescheduled }) {
   </div>
 }
 
-function WalkInSchedule({ close, dentists, services, onCreated }) {
-  const initialSchedule = nextClinicSlot()
+function CreateSchedule({ close, dentists, services, initialDate, onCreated }) {
   const [query, setQuery] = useState('')
   const [patients, setPatients] = useState([])
   const [patient, setPatient] = useState(null)
   const [searched, setSearched] = useState(false)
   const [dentistId, setDentistId] = useState(dentists[0]?.id || '')
   const [serviceId, setServiceId] = useState(services[0]?.id || '')
-  const [date, setDate] = useState(initialSchedule.date)
-  const [time, setTime] = useState(initialSchedule.time)
+  const [date, setDate] = useState(initialDate)
+  const [time, setTime] = useState(clinicTimeForDate(initialDate))
   const [searching, setSearching] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -194,7 +186,7 @@ function WalkInSchedule({ close, dentists, services, onCreated }) {
   const submit = async (event) => {
     event.preventDefault()
     if (!patient) {
-      setError('Search for and select the walk-in patient first.')
+      setError('Search for and select the patient first.')
       return
     }
     setBusy(true)
@@ -208,17 +200,17 @@ function WalkInSchedule({ close, dentists, services, onCreated }) {
       })
       await onCreated(date)
     } catch (requestError) {
-      setError(requestError.message || 'The walk-in appointment could not be scheduled.')
+      setError(requestError.message || 'The appointment could not be scheduled.')
     } finally {
       setBusy(false)
     }
   }
 
   return <div className="fixed inset-0 z-50 grid place-items-center bg-ink/40 p-4 backdrop-blur-sm" onMouseDown={(event) => event.target === event.currentTarget && close()}>
-    <form aria-labelledby="walk-in-title" aria-modal="true" className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-[30px] bg-white p-6 soft-shadow sm:p-8" onSubmit={submit} role="dialog">
+    <form aria-labelledby="create-schedule-title" aria-modal="true" className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-[30px] bg-white p-6 soft-shadow sm:p-8" onSubmit={submit} role="dialog">
       <div className="flex items-start justify-between gap-4">
-        <div><p className="text-xs font-extrabold uppercase tracking-[.16em] text-brand/60">Reception calendar</p><h2 className="mt-2 text-2xl font-extrabold" id="walk-in-title">Schedule a walk-in</h2></div>
-        <button aria-label="Close walk-in scheduler" className="rounded-xl bg-cream p-2.5 text-ink/55 hover:bg-mint" onClick={close} type="button"><X size={19} /></button>
+        <div><p className="text-xs font-extrabold uppercase tracking-[.16em] text-brand/60">Reception calendar</p><h2 className="mt-2 text-2xl font-extrabold" id="create-schedule-title">Add schedule</h2><p className="mt-1 text-sm text-ink/45">{formatDate(initialDate, { weekday: 'long' })}</p></div>
+        <button aria-label="Close schedule form" className="rounded-xl bg-cream p-2.5 text-ink/55 hover:bg-mint" onClick={close} type="button"><X size={19} /></button>
       </div>
 
       <div className="mt-6">
@@ -234,7 +226,7 @@ function WalkInSchedule({ close, dentists, services, onCreated }) {
       <div className="mt-6 grid gap-4 sm:grid-cols-2">
         <label className="text-sm font-extrabold">Service<select className="input-field mt-2" required value={serviceId} onChange={(event) => setServiceId(event.target.value)}>{services.map((service) => <option key={service.id} value={service.id}>{service.name}</option>)}</select></label>
         <label className="text-sm font-extrabold">Dentist<select className="input-field mt-2" required value={dentistId} onChange={(event) => setDentistId(event.target.value)}>{dentists.map((dentist) => <option key={dentist.id} value={dentist.id}>{dentist.displayName}</option>)}</select></label>
-        <label className="text-sm font-extrabold">Date<input className="input-field mt-2" type="date" min={manilaToday()} required value={date} onChange={(event) => setDate(event.target.value)} /></label>
+        <label className="text-sm font-extrabold">Date<input className="input-field mt-2" type="date" min={manilaToday()} required value={date} onChange={(event) => { const nextDate = event.target.value; setDate(nextDate); setTime(clinicTimeForDate(nextDate) || '09:00') }} /></label>
         <label className="text-sm font-extrabold">Time<select className="input-field mt-2" required value={time} onChange={(event) => setTime(event.target.value)}>{hourlyTimes.map((value) => <option key={value} value={value}>{formatTime(new Date(`2000-01-01T${value}:00+08:00`))}</option>)}</select></label>
       </div>
       {error && <p className="mt-4 rounded-xl bg-[#fff0e7] p-3 text-sm text-[#914b22]" role="alert">{error}</p>}
@@ -247,7 +239,7 @@ export default function ReceptionCalendarPage() {
   const today = manilaToday()
   const [weekStart, setWeekStart] = useState(() => calendarWeek(today)[0])
   const [selected, setSelected] = useState(null)
-  const [showWalkIn, setShowWalkIn] = useState(false)
+  const [scheduleDate, setScheduleDate] = useState(null)
   const [message, setMessage] = useState('')
   const [state, setState] = useState({ loading: true, days: [], dentists: [], services: [], error: null })
 
@@ -281,10 +273,9 @@ export default function ReceptionCalendarPage() {
       <div>
         <p className="text-xs font-extrabold uppercase tracking-[.18em] text-brand/60">Clinic schedule</p>
         <h1 className="mt-2 text-3xl font-extrabold tracking-tight">Weekly appointment calendar</h1>
-        <p className="mt-2 text-sm text-ink/50">Sunday to Saturday · Select a booking to view its details.</p>
+        <p className="mt-2 text-sm text-ink/50">Sunday to Saturday · Click an available day to add a schedule, or select a booking to view details.</p>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <button className="inline-flex items-center gap-2 rounded-xl bg-brand px-4 py-2.5 text-xs font-extrabold text-white shadow-sm hover:bg-brand-dark disabled:opacity-50" disabled={!state.dentists.length || !state.services.length} onClick={() => { setShowWalkIn(true); setMessage('') }} type="button"><CalendarPlus size={17} /> Schedule walk-in</button>
         <button aria-label="Previous week" className="rounded-xl bg-white p-2.5 text-brand shadow-sm hover:bg-mint" onClick={() => setWeekStart(shiftDate(weekStart, -7))} type="button"><ChevronLeft size={19} /></button>
         <button className="rounded-xl bg-white px-4 py-2.5 text-xs font-extrabold text-brand shadow-sm hover:bg-mint" onClick={() => setWeekStart(calendarWeek(today)[0])} type="button">This week</button>
         <button aria-label="Next week" className="rounded-xl bg-white p-2.5 text-brand shadow-sm hover:bg-mint" onClick={() => setWeekStart(shiftDate(weekStart, 7))} type="button"><ChevronRight size={19} /></button>
@@ -304,11 +295,14 @@ export default function ReceptionCalendarPage() {
     {state.loading ? <LoadingState label="Loading this week’s clinic calendar…" />
       : state.error ? <ErrorState error={state.error} onRetry={load} />
         : <div className="space-y-4" aria-label="Weekly schedule">
-          {state.days.map((day) => <section className={`rounded-3xl border bg-white p-4 soft-shadow sm:p-5 ${day.date === today ? 'border-brand/25' : 'border-transparent'}`} key={day.date}>
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-2 border-b border-ink/6 pb-4">
+          {state.days.map((day) => {
+            const firstAvailableTime = clinicTimeForDate(day.date)
+            const canCreate = Boolean(firstAvailableTime && state.dentists.length && state.services.length)
+            return <section className={`rounded-3xl border bg-white p-4 soft-shadow sm:p-5 ${day.date === today ? 'border-brand/25' : 'border-transparent'}`} key={day.date}>
+            <button className={`mb-4 flex w-full flex-wrap items-center justify-between gap-2 border-b border-ink/6 pb-4 text-left ${canCreate ? 'group cursor-pointer hover:text-brand' : 'cursor-default'}`} disabled={!canCreate} onClick={() => { setScheduleDate(day.date); setMessage('') }} type="button">
               <div><h2 className="text-lg font-extrabold">{formatDate(day.date, { weekday: 'long' })}</h2><p className="mt-1 text-xs text-ink/40">{day.items.length} booking{day.items.length === 1 ? '' : 's'}</p></div>
-              {day.date === today && <span className="rounded-full bg-mint px-3 py-1 text-[10px] font-extrabold uppercase tracking-wide text-brand">Today</span>}
-            </div>
+              <div className="flex items-center gap-2">{canCreate && <span className="text-[10px] font-extrabold uppercase tracking-wide text-brand/60 group-hover:text-brand">Click day to add schedule</span>}{day.date === today && <span className="rounded-full bg-mint px-3 py-1 text-[10px] font-extrabold uppercase tracking-wide text-brand">Today</span>}</div>
+            </button>
             {day.items.length ? <div className="space-y-2">
               {day.items.map((item) => <button aria-haspopup="dialog" className={`group flex w-full flex-col gap-3 rounded-2xl p-4 text-left transition hover:bg-mint/60 focus:outline-none focus:ring-4 focus:ring-brand/10 sm:flex-row sm:items-center ${item.status === 'completed' ? 'bg-[#edf7f1]' : 'bg-cream/55'}`} key={`${item.kind}-${item.id}`} onClick={() => setSelected(item)} type="button">
                 <div className={`flex w-full shrink-0 items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-sm font-extrabold sm:w-28 ${item.status === 'completed' ? 'bg-[#3f8060] text-white' : item.kind === 'appointment' ? 'bg-brand text-white' : 'bg-white text-brand'}`}><Clock3 size={15} />{formatTime(item.time)}</div>
@@ -316,10 +310,10 @@ export default function ReceptionCalendarPage() {
                 <span className="text-xs font-bold text-ink/35">View details</span>
               </button>)}
             </div> : <p className="rounded-2xl bg-cream/40 px-4 py-5 text-center text-sm text-ink/40">No bookings scheduled.</p>}
-          </section>)}
+          </section>})}
         </div>}
 
     {selected && <BookingDetails booking={selected} close={() => setSelected(null)} dentists={state.dentists} onRescheduled={async () => { setSelected(null); setMessage('Appointment schedule and dentist updated.'); await load() }} />}
-    {showWalkIn && <WalkInSchedule close={() => setShowWalkIn(false)} dentists={state.dentists} services={state.services} onCreated={async (date) => { setShowWalkIn(false); setMessage('Walk-in appointment added to the calendar.'); const targetWeek = calendarWeek(date)[0]; if (targetWeek === weekStart) await load(); else setWeekStart(targetWeek) }} />}
+    {scheduleDate && <CreateSchedule close={() => setScheduleDate(null)} dentists={state.dentists} services={state.services} initialDate={scheduleDate} onCreated={async (date) => { setScheduleDate(null); setMessage('Appointment added to the calendar.'); const targetWeek = calendarWeek(date)[0]; if (targetWeek === weekStart) await load(); else setWeekStart(targetWeek) }} />}
   </>
 }
