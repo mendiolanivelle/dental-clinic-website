@@ -63,6 +63,47 @@ const staffFromRow = (row) => ({
   displayName: row.display_name,
   email: row.email,
   role: row.role,
+  dentistId: row.dentist_id,
+})
+
+const dentistPatientFromRow = (row) => ({
+  id: row.id,
+  displayName: row.display_name,
+  patientNumber: row.patient_number,
+  phone: row.phone_e164,
+  age: row.age,
+  gender: row.gender,
+  weightKg: row.weight_kg === null ? null : Number(row.weight_kg),
+  bloodPressureSystolic: row.blood_pressure_systolic,
+  bloodPressureDiastolic: row.blood_pressure_diastolic,
+  allergies: row.allergies,
+  medicalConditions: row.medical_conditions,
+  currentMedications: row.current_medications,
+  medicalHistoryReviewedAt: row.medical_history_reviewed_at,
+})
+
+const prescriptionFromRow = (row) => ({
+  id: row.id,
+  patientId: row.patient_id,
+  dentistName: row.dentist_name,
+  prescribedOn: row.prescribed_on,
+  genericName: row.generic_name,
+  instructions: row.instructions,
+  imageMimeType: row.image_mime_type,
+  imageOriginalName: row.image_original_name,
+  imageByteSize: row.image_byte_size,
+  createdAt: row.created_at,
+})
+
+const followUpFromRow = (row) => ({
+  id: row.id,
+  patientId: row.patient_id,
+  dentistName: row.dentist_name,
+  serviceName: row.service_name,
+  recommendedOn: row.recommended_on,
+  notes: row.notes,
+  status: row.status,
+  createdAt: row.created_at,
 })
 
 const receptionRequestFromRow = (row) => ({
@@ -458,7 +499,7 @@ export function createStore(db) {
     }) {
       return db.transaction(async (client) => {
         const result = await client.query(
-          `SELECT id, display_name, email, role
+          `SELECT id, display_name, email, role, dentist_id
            FROM staff_profiles
            WHERE auth_user_id = $1 AND active = true
            LIMIT 1`,
@@ -503,7 +544,7 @@ export function createStore(db) {
            AND s.absolute_expires_at > $2
            AND s.last_seen_at >= $3
            AND p.active = true
-         RETURNING p.id, p.display_name, p.email, p.role`,
+         RETURNING p.id, p.display_name, p.email, p.role, p.dentist_id`,
         [tokenDigest, now, idleCutoff],
       )
       return result.rowCount ? staffFromRow(result.rows[0]) : null
@@ -525,6 +566,237 @@ export function createStore(db) {
     listAppointments,
     listRecords,
     getTreatmentPlan,
+
+    async getDentistDashboard(dentistId, date) {
+      const result = await db.query(
+        `SELECT a.id, t.name AS type_name, a.starts_at, a.ends_at, a.status,
+                p.id AS patient_id, p.display_name, p.patient_number,
+                p.phone_e164, p.age, p.gender, p.weight_kg,
+                p.blood_pressure_systolic, p.blood_pressure_diastolic,
+                p.allergies, p.medical_conditions, p.current_medications,
+                p.medical_history_reviewed_at
+         FROM appointments a
+         JOIN appointment_types t ON t.id = a.appointment_type_id
+         JOIN patients p ON p.id = a.patient_id
+         WHERE a.dentist_id = $1
+           AND (a.starts_at AT TIME ZONE 'Asia/Manila')::date = $2::date
+           AND a.status IN ('scheduled', 'confirmed', 'completed')
+         ORDER BY a.starts_at ASC`,
+        [dentistId, date],
+      )
+      return {
+        appointments: result.rows.map((row) => ({
+          id: row.id,
+          typeName: row.type_name,
+          startsAt: row.starts_at,
+          endsAt: row.ends_at,
+          status: row.status,
+          patient: dentistPatientFromRow({ ...row, id: row.patient_id }),
+        })),
+      }
+    },
+
+    async searchDentistPatients(dentistId, query) {
+      const result = await db.query(
+        `SELECT p.id, p.display_name, p.patient_number, p.phone_e164, p.age, p.gender,
+                p.weight_kg, p.blood_pressure_systolic, p.blood_pressure_diastolic,
+                p.allergies, p.medical_conditions, p.current_medications,
+                p.medical_history_reviewed_at
+         FROM patients p
+         WHERE (
+             EXISTS (SELECT 1 FROM appointments a WHERE a.patient_id = p.id AND a.dentist_id = $1)
+             OR EXISTS (SELECT 1 FROM clinical_records r WHERE r.patient_id = p.id AND r.dentist_id = $1)
+             OR EXISTS (SELECT 1 FROM prescriptions rx WHERE rx.patient_id = p.id AND rx.dentist_id = $1)
+             OR EXISTS (SELECT 1 FROM follow_up_recommendations f WHERE f.patient_id = p.id AND f.dentist_id = $1)
+           )
+           AND (
+             position(lower($2) in lower(p.display_name)) > 0
+             OR position(upper($2) in p.patient_number) > 0
+           )
+         ORDER BY p.display_name ASC
+         LIMIT 100`,
+        [dentistId, query],
+      )
+      return result.rows.map(dentistPatientFromRow)
+    },
+
+    async getDentistPatient(dentistId, patientId) {
+      const patientResult = await db.query(
+        `SELECT p.id, p.display_name, p.patient_number, p.phone_e164, p.age, p.gender,
+                p.weight_kg, p.blood_pressure_systolic, p.blood_pressure_diastolic,
+                p.allergies, p.medical_conditions, p.current_medications,
+                p.medical_history_reviewed_at
+         FROM patients p
+         WHERE p.id = $2
+           AND (
+             EXISTS (SELECT 1 FROM appointments a WHERE a.patient_id = p.id AND a.dentist_id = $1)
+             OR EXISTS (SELECT 1 FROM clinical_records r WHERE r.patient_id = p.id AND r.dentist_id = $1)
+             OR EXISTS (SELECT 1 FROM prescriptions rx WHERE rx.patient_id = p.id AND rx.dentist_id = $1)
+             OR EXISTS (SELECT 1 FROM follow_up_recommendations f WHERE f.patient_id = p.id AND f.dentist_id = $1)
+           )`,
+        [dentistId, patientId],
+      )
+      if (!patientResult.rowCount) return null
+
+      const [appointments, records, plans, prescriptions, followUps, services] = await Promise.all([
+        db.query(
+          `SELECT a.id, t.name AS type_name, a.starts_at, a.ends_at, a.status,
+                  d.display_name AS dentist_name, a.patient_instructions
+           FROM appointments a
+           JOIN appointment_types t ON t.id = a.appointment_type_id
+           JOIN dentists d ON d.id = a.dentist_id
+           WHERE a.patient_id = $1
+           ORDER BY a.starts_at DESC`,
+          [patientId],
+        ),
+        db.query(
+          `SELECT r.id, r.appointment_id, r.procedure_name, r.treated_on,
+                  r.patient_summary, d.display_name AS dentist_name
+           FROM clinical_records r
+           JOIN dentists d ON d.id = r.dentist_id
+           WHERE r.patient_id = $1
+           ORDER BY r.treated_on DESC, r.created_at DESC`,
+          [patientId],
+        ),
+        db.query(
+          `SELECT id, title, patient_summary, status, started_on,
+                  recommended_interval_days, next_recommended_on
+           FROM treatment_plans
+           WHERE patient_id = $1
+           ORDER BY updated_at DESC`,
+          [patientId],
+        ),
+        db.query(
+          `SELECT rx.id, rx.patient_id, d.display_name AS dentist_name,
+                  rx.prescribed_on, rx.generic_name, rx.instructions,
+                  rx.image_mime_type, rx.image_original_name,
+                  rx.image_byte_size, rx.created_at
+           FROM prescriptions rx
+           JOIN dentists d ON d.id = rx.dentist_id
+           WHERE rx.patient_id = $1
+           ORDER BY rx.prescribed_on DESC, rx.created_at DESC`,
+          [patientId],
+        ),
+        db.query(
+          `SELECT f.id, f.patient_id, d.display_name AS dentist_name,
+                  t.name AS service_name, f.recommended_on, f.notes,
+                  f.status, f.created_at
+           FROM follow_up_recommendations f
+           JOIN dentists d ON d.id = f.dentist_id
+           LEFT JOIN appointment_types t ON t.id = f.appointment_type_id
+           WHERE f.patient_id = $1
+           ORDER BY f.recommended_on DESC, f.created_at DESC`,
+          [patientId],
+        ),
+        listServices(),
+      ])
+      return {
+        patient: dentistPatientFromRow(patientResult.rows[0]),
+        appointments: appointments.rows.map(appointmentFromRow),
+        records: records.rows.map(recordFromRow),
+        treatmentPlans: plans.rows.map(treatmentPlanFromRow),
+        prescriptions: prescriptions.rows.map(prescriptionFromRow),
+        followUps: followUps.rows.map(followUpFromRow),
+        services,
+      }
+    },
+
+    async createDentistPrescription({
+      dentistId,
+      staffId,
+      patientId,
+      prescribedOn,
+      genericName,
+      instructions,
+      imageMimeType,
+      imageOriginalName,
+      imageBytes,
+      imageSha256,
+      now,
+    }) {
+      const result = await db.query(
+        `INSERT INTO prescriptions (
+           patient_id, dentist_id, created_by_staff_id, prescribed_on,
+           generic_name, instructions, image_mime_type, image_original_name,
+           image_byte_size, image_sha256, image_bytes, created_at
+         )
+         SELECT p.id, $1, $2, $4::date, $5, $6, $7, $8, $9, $10, $11, $12
+         FROM patients p
+         WHERE p.id = $3
+           AND (
+             EXISTS (SELECT 1 FROM appointments a WHERE a.patient_id = p.id AND a.dentist_id = $1)
+             OR EXISTS (SELECT 1 FROM clinical_records r WHERE r.patient_id = p.id AND r.dentist_id = $1)
+             OR EXISTS (SELECT 1 FROM prescriptions rx WHERE rx.patient_id = p.id AND rx.dentist_id = $1)
+             OR EXISTS (SELECT 1 FROM follow_up_recommendations f WHERE f.patient_id = p.id AND f.dentist_id = $1)
+           )
+         RETURNING id`,
+        [
+          dentistId,
+          staffId,
+          patientId,
+          prescribedOn,
+          genericName,
+          instructions,
+          imageMimeType,
+          imageOriginalName,
+          imageBytes.length,
+          imageSha256,
+          imageBytes,
+          now,
+        ],
+      )
+      return result.rowCount ? result.rows[0].id : null
+    },
+
+    async getDentistPrescriptionImage(dentistId, prescriptionId) {
+      const result = await db.query(
+        `SELECT rx.image_mime_type, rx.image_original_name, rx.image_bytes
+         FROM prescriptions rx
+         WHERE rx.id = $2
+           AND (
+             rx.dentist_id = $1
+             OR EXISTS (SELECT 1 FROM appointments a WHERE a.patient_id = rx.patient_id AND a.dentist_id = $1)
+             OR EXISTS (SELECT 1 FROM clinical_records r WHERE r.patient_id = rx.patient_id AND r.dentist_id = $1)
+           )`,
+        [dentistId, prescriptionId],
+      )
+      if (!result.rowCount) return null
+      return {
+        mimeType: result.rows[0].image_mime_type,
+        originalName: result.rows[0].image_original_name,
+        bytes: result.rows[0].image_bytes,
+      }
+    },
+
+    async createDentistFollowUp({
+      dentistId,
+      staffId,
+      patientId,
+      appointmentTypeId,
+      recommendedOn,
+      notes,
+      now,
+    }) {
+      const result = await db.query(
+        `INSERT INTO follow_up_recommendations (
+           patient_id, dentist_id, appointment_type_id, created_by_staff_id,
+           recommended_on, notes, created_at, updated_at
+         )
+         SELECT p.id, $1, $4, $2, $5::date, $6, $7, $7
+         FROM patients p
+         WHERE p.id = $3
+           AND ($4::uuid IS NULL OR EXISTS (SELECT 1 FROM appointment_types t WHERE t.id = $4))
+           AND (
+             EXISTS (SELECT 1 FROM appointments a WHERE a.patient_id = p.id AND a.dentist_id = $1)
+             OR EXISTS (SELECT 1 FROM clinical_records r WHERE r.patient_id = p.id AND r.dentist_id = $1)
+             OR EXISTS (SELECT 1 FROM prescriptions rx WHERE rx.patient_id = p.id AND rx.dentist_id = $1)
+             OR EXISTS (SELECT 1 FROM follow_up_recommendations f WHERE f.patient_id = p.id AND f.dentist_id = $1)
+           )
+         RETURNING id`,
+        [dentistId, staffId, patientId, appointmentTypeId, recommendedOn, notes, now],
+      )
+      return result.rowCount ? result.rows[0].id : null
+    },
 
     async listPatientBilling(patientId) {
       return loadCharges(db, 'c.patient_id = $1', [patientId], false, false)

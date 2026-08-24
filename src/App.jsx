@@ -16,7 +16,12 @@ import ReceptionDashboardPage from './pages/ReceptionDashboardPage'
 import ReceptionBillingPage from './pages/ReceptionBillingPage'
 import ReceptionPatientsPage from './pages/ReceptionPatientsPage'
 import ReceptionRequestsPage from './pages/ReceptionRequestsPage'
+import DentistDashboardPage from './pages/DentistDashboardPage'
+import DentistPatientsPage from './pages/DentistPatientsPage'
+import DentistPatientPage from './pages/DentistPatientPage'
 import { patientFrom } from './portalData'
+
+const staffHome = (staff) => staff?.role === 'dentist' ? '/dentist' : '/reception'
 
 function AppLoading() {
   return (
@@ -117,7 +122,7 @@ export default function App() {
   if (auth.status === 'error') return <AppUnavailable error={auth.error} onRetry={loadSession} />
 
   const authenticated = auth.status === 'authenticated'
-  const home = auth.kind === 'staff' ? '/reception' : '/portal'
+  const home = auth.kind === 'staff' ? staffHome(auth.user) : '/portal'
 
   return (
     <Routes>
@@ -141,15 +146,25 @@ export default function App() {
       </Route>
       <Route
         path="/reception"
-        element={authenticated && auth.kind === 'staff'
+        element={authenticated && auth.kind === 'staff' && auth.user.role !== 'dentist'
           ? <ReceptionLayout staff={auth.user} onLogout={handleLogout} />
-          : <Navigate replace state={{ sessionExpired }} to="/login" />}
+          : <Navigate replace state={{ sessionExpired }} to={authenticated ? home : '/login'} />}
       >
         <Route index element={<ReceptionDashboardPage />} />
         <Route path="requests" element={<ReceptionRequestsPage />} />
         <Route path="calendar" element={<ReceptionCalendarPage />} />
         <Route path="billing" element={<ReceptionBillingPage />} />
         <Route path="patients" element={<ReceptionPatientsPage />} />
+      </Route>
+      <Route
+        path="/dentist"
+        element={authenticated && auth.kind === 'staff' && auth.user.role === 'dentist'
+          ? <ReceptionLayout staff={auth.user} onLogout={handleLogout} />
+          : <Navigate replace to={authenticated ? home : '/login'} />}
+      >
+        <Route index element={<DentistDashboardPage />} />
+        <Route path="patients" element={<DentistPatientsPage />} />
+        <Route path="patients/:id" element={<DentistPatientPage />} />
       </Route>
       <Route path="*" element={<Navigate replace to={authenticated ? home : '/login'} />} />
     </Routes>

@@ -129,9 +129,9 @@ export default function LoginPage({ onAuthenticated, onStaffAuthenticated }) {
   return (
     <AuthLayout
       accessLabel={access === 'staff' ? 'Clinic staff access' : 'Patient access'}
-      title={access === 'staff' ? 'Reception portal' : 'Welcome back'}
+      title={access === 'staff' ? 'Clinic staff portal' : 'Welcome back'}
       description={access === 'staff'
-        ? 'Sign in with your clinic-provided staff account to manage patients and appointments.'
+        ? 'Sign in with your clinic-provided account. Your role opens the correct staff workspace.'
         : 'Enter the details provided by your clinic to securely view your dental care information.'}
       footer={access === 'staff'
         ? 'Staff access is restricted to clinic-provisioned accounts and recorded for security.'
@@ -278,7 +278,7 @@ export default function LoginPage({ onAuthenticated, onStaffAuthenticated }) {
           type="submit"
           disabled={submitting}
         >
-          {submitting ? 'Signing in…' : access === 'staff' ? 'Open reception portal' : 'Open my portal'}
+          {submitting ? 'Signing in…' : access === 'staff' ? 'Open staff portal' : 'Open my portal'}
           {!submitting && <ArrowRight size={18} />}
         </button>
       </form>

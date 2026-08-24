@@ -13,7 +13,7 @@ import {
 } from 'lucide-react'
 import BrandLogo from './BrandLogo'
 
-const navigation = [
+const receptionNavigation = [
   { label: 'Overview', to: '/reception', icon: LayoutDashboard, end: true },
   { label: 'Booking requests', to: '/reception/requests', icon: ClipboardList },
   { label: 'Calendar', to: '/reception/calendar', icon: CalendarDays },
@@ -21,10 +21,15 @@ const navigation = [
   { label: 'Patients', to: '/reception/patients', icon: UsersRound },
 ]
 
+const dentistNavigation = [
+  { label: 'Overview', to: '/dentist', icon: LayoutDashboard, end: true },
+  { label: 'My patients', to: '/dentist/patients', icon: UsersRound },
+]
+
 const initials = (name = '') =>
   name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'R'
 
-function Sidebar({ open, close, onLogout }) {
+function Sidebar({ open, close, onLogout, dentistPortal }) {
   const closeButton = useRef(null)
   const location = useLocation()
   const [loggingOut, setLoggingOut] = useState(false)
@@ -45,7 +50,7 @@ function Sidebar({ open, close, onLogout }) {
   return <>
     {open && <button aria-label="Close navigation" className="fixed inset-0 z-30 bg-ink/35 backdrop-blur-sm lg:hidden" onClick={close} />}
     <aside
-      id="reception-navigation"
+      id="staff-navigation"
       className={`sidebar-shadow fixed inset-y-0 left-0 z-40 flex w-[285px] flex-col overflow-y-auto bg-white px-5 py-7 transition-transform duration-300 lg:translate-x-0 ${open ? 'translate-x-0' : '-translate-x-full'}`}
     >
       <div className="mb-8 flex items-center justify-between px-2">
@@ -54,9 +59,9 @@ function Sidebar({ open, close, onLogout }) {
           <X size={20} />
         </button>
       </div>
-      <p className="mb-3 px-4 text-[10px] font-extrabold uppercase tracking-[.2em] text-ink/35">Reception menu</p>
-      <nav className="space-y-1" aria-label="Reception portal">
-        {navigation.map(({ label, to, icon: Icon, end }) => (
+      <p className="mb-3 px-4 text-[10px] font-extrabold uppercase tracking-[.2em] text-ink/35">{dentistPortal ? 'Dentist menu' : 'Reception menu'}</p>
+      <nav className="space-y-1" aria-label={dentistPortal ? 'Dentist portal' : 'Reception portal'}>
+        {(dentistPortal ? dentistNavigation : receptionNavigation).map(({ label, to, icon: Icon, end }) => (
           <NavLink
             key={to}
             end={end}
@@ -93,19 +98,20 @@ function Sidebar({ open, close, onLogout }) {
 export default function ReceptionLayout({ staff, onLogout }) {
   const [open, setOpen] = useState(false)
   const close = useCallback(() => setOpen(false), [])
+  const dentistPortal = staff.role === 'dentist'
 
   return (
     <div className="min-h-screen bg-cream">
-      <a href="#reception-content" className="fixed left-4 top-3 z-50 -translate-y-20 rounded-xl bg-brand px-4 py-2 text-sm font-bold text-white focus:translate-y-0">Skip to content</a>
-      <Sidebar open={open} close={close} onLogout={onLogout} />
+      <a href="#staff-content" className="fixed left-4 top-3 z-50 -translate-y-20 rounded-xl bg-brand px-4 py-2 text-sm font-bold text-white focus:translate-y-0">Skip to content</a>
+      <Sidebar open={open} close={close} onLogout={onLogout} dentistPortal={dentistPortal} />
       <div className="min-h-screen lg:ml-[285px]">
         <header className="border-b border-ink/5 bg-cream/90 backdrop-blur">
           <div className="mx-auto flex max-w-[1500px] items-center gap-3 px-5 py-5 sm:px-8 lg:px-10 xl:px-14">
-            <button aria-label="Open navigation" aria-controls="reception-navigation" aria-expanded={open} className="rounded-2xl bg-white p-3 text-ink shadow-sm lg:hidden" onClick={() => setOpen(true)}>
+            <button aria-label="Open navigation" aria-controls="staff-navigation" aria-expanded={open} className="rounded-2xl bg-white p-3 text-ink shadow-sm lg:hidden" onClick={() => setOpen(true)}>
               <Menu size={21} />
             </button>
             <div className="hidden items-center gap-2 text-xs font-bold text-brand/70 sm:flex">
-              <ShieldCheck size={16} /> Secure reception portal
+              <ShieldCheck size={16} /> Secure {dentistPortal ? 'dentist' : 'reception'} portal
             </div>
             <div className="ml-auto flex items-center gap-3 rounded-2xl bg-white py-1.5 pl-1.5 pr-3 shadow-sm">
               <div className="grid h-10 w-10 place-items-center rounded-xl bg-mint text-sm font-extrabold text-brand">{initials(staff.displayName)}</div>
@@ -116,7 +122,7 @@ export default function ReceptionLayout({ staff, onLogout }) {
             </div>
           </div>
         </header>
-        <main id="reception-content" className="mx-auto max-w-[1500px] px-5 py-8 sm:px-8 lg:px-10 lg:py-10 xl:px-14">
+        <main id="staff-content" className="mx-auto max-w-[1500px] px-5 py-8 sm:px-8 lg:px-10 lg:py-10 xl:px-14">
           <Outlet context={{ staff }} />
         </main>
       </div>

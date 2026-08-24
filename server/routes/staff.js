@@ -54,6 +54,9 @@ const paymentBody = {
 const manilaDate = (date) =>
   new Date(date.getTime() + 8 * 60 * 60_000).toISOString().slice(0, 10)
 
+const staffRoles = ['receptionist', 'dentist', 'admin']
+const receptionRoles = ['receptionist', 'admin']
+
 export default async function staffRoutes(
   app,
   { store, config, now, randomBytes, randomUUID, verifyStaffCredentials },
@@ -81,7 +84,7 @@ export default async function staffRoutes(
   const requireReception = async (request, reply) => {
     await app.authenticateStaff(request, reply)
     if (reply.sent) return
-    if (!['receptionist', 'admin'].includes(request.staff.role)) {
+    if (!receptionRoles.includes(request.staff.role)) {
       return reply.code(403).send({
         error: { code: 'FORBIDDEN', message: 'This account does not have reception access.' },
       })
@@ -142,7 +145,7 @@ export default async function staffRoutes(
           userAgent: request.headers['user-agent'],
         },
       })
-      if (!staff || !['receptionist', 'admin'].includes(staff.role)) {
+      if (!staff || !staffRoles.includes(staff.role)) {
         if (staff) await store.revokeStaffSession(sha256(token), currentTime)
         await checkLoginRateLimit(request)
         return reply.code(401).send(loginError)
@@ -168,7 +171,7 @@ export default async function staffRoutes(
     return reply.code(204).send()
   })
 
-  app.get('/api/staff/me', { preHandler: requireReception }, async (request) => {
+  app.get('/api/staff/me', { preHandler: app.authenticateStaff }, async (request) => {
     await audit(request, 'staff.profile_viewed')
     return { staff: request.staff }
   })

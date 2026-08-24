@@ -31,6 +31,7 @@ class MemoryStore {
       displayName: 'Rina Reception',
       email: 'reception@dental.test',
       role: 'receptionist',
+      dentistId: null,
       active: true,
     }
     this.otherPatientId = '10000000-0000-4000-8000-000000000002'
@@ -136,6 +137,8 @@ class MemoryStore {
     this.sessions = new Map()
     this.staffSessions = new Map()
     this.charges = []
+    this.prescriptions = []
+    this.followUps = []
     this.audits = []
     this.healthy = true
   }
@@ -253,6 +256,74 @@ class MemoryStore {
       todayAppointments: [],
       todayRequests: [],
     }
+  }
+
+  async getDentistDashboard(dentistId) {
+    return {
+      appointments: this.appointments
+        .filter((appointment) => appointment.dentistId === dentistId)
+        .map((appointment) => ({
+          ...appointment,
+          patient: {
+            ...this.patient,
+            age: 29,
+            gender: 'female',
+            allergies: 'Penicillin',
+          },
+        })),
+    }
+  }
+
+  async searchDentistPatients(dentistId, query) {
+    const assigned = this.appointments.some((appointment) =>
+      appointment.patientId === this.patient.id && appointment.dentistId === dentistId)
+    if (!assigned || !this.patient.displayName.toLowerCase().includes(query.toLowerCase())) return []
+    return [{ ...this.patient, age: 29, gender: 'female', allergies: 'Penicillin' }]
+  }
+
+  async getDentistPatient(dentistId, patientId) {
+    const assigned = this.appointments.some((appointment) =>
+      appointment.patientId === patientId && appointment.dentistId === dentistId)
+    if (!assigned) return null
+    return {
+      patient: { ...this.patient, age: 29, gender: 'female', allergies: 'Penicillin' },
+      appointments: this.appointments.filter((appointment) => appointment.patientId === patientId),
+      records: this.records.filter((record) => record.patientId === patientId),
+      treatmentPlans: this.plans.filter((plan) => plan.patientId === patientId),
+      prescriptions: this.prescriptions.filter((item) => item.patientId === patientId),
+      followUps: this.followUps.filter((item) => item.patientId === patientId),
+      services: this.services,
+    }
+  }
+
+  async createDentistPrescription(input) {
+    if (!await this.getDentistPatient(input.dentistId, input.patientId)) return null
+    const id = 'a0000000-0000-4000-8000-000000000001'
+    this.prescriptions.push({
+      id,
+      patientId: input.patientId,
+      genericName: input.genericName,
+      instructions: input.instructions,
+      prescribedOn: input.prescribedOn,
+      imageMimeType: input.imageMimeType,
+      imageOriginalName: input.imageOriginalName,
+      imageBytes: input.imageBytes,
+      dentistName: this.dentist.displayName,
+    })
+    return id
+  }
+
+  async getDentistPrescriptionImage(dentistId, prescriptionId) {
+    const item = this.prescriptions.find(({ id }) => id === prescriptionId)
+    if (!item || dentistId !== this.dentist.id) return null
+    return { mimeType: item.imageMimeType, originalName: item.imageOriginalName, bytes: item.imageBytes }
+  }
+
+  async createDentistFollowUp(input) {
+    if (!await this.getDentistPatient(input.dentistId, input.patientId)) return null
+    const id = 'b0000000-0000-4000-8000-000000000001'
+    this.followUps.push({ id, patientId: input.patientId, recommendedOn: input.recommendedOn, notes: input.notes, status: 'pending' })
+    return id
   }
 
   async listReceptionRequests() {
@@ -1158,6 +1229,112 @@ test('reception staff use a separate protected session and can confirm booking r
   }
 })
 
+test('dentist staff can restore their staff session but cannot use reception endpoints', async () => {
+  const dentistStore = new MemoryStore()
+  dentistStore.staff.role = 'dentist'
+  dentistStore.staff.dentistId = dentistStore.dentist.id
+  dentistStore.staff.displayName = 'Dr. Andrea Sample'
+  dentistStore.staff.email = 'dentist@dental.test'
+  const dentistApp = await buildApp({
+    config,
+    store: dentistStore,
+    now: () => new Date('2030-01-01T00:00:00.000Z'),
+    staticDir: false,
+    logger: false,
+    verifyStaffCredentials: async ({ email, password }) =>
+      email === dentistStore.staff.email && password === 'correct-password'
+        ? { authUserId: dentistStore.staff.authUserId, email }
+        : null,
+  })
+  await dentistApp.ready()
+  try {
+    const loggedIn = await dentistApp.inject({
+      method: 'POST',
+      url: '/api/staff/auth/login',
+      headers: { origin: config.publicOrigin },
+      payload: { email: dentistStore.staff.email, password: 'correct-password' },
+    })
+    assert.equal(loggedIn.statusCode, 200)
+    assert.equal(loggedIn.json().staff.role, 'dentist')
+    const cookie = loggedIn.headers['set-cookie'].split(';')[0]
+
+    const me = await dentistApp.inject({ url: '/api/staff/me', headers: { cookie } })
+    assert.equal(me.statusCode, 200)
+    assert.equal(me.json().staff.role, 'dentist')
+    assert.equal(me.json().staff.dentistId, dentistStore.dentist.id)
+
+    const dashboard = await dentistApp.inject({ url: '/api/dentist/dashboard', headers: { cookie } })
+    assert.equal(dashboard.statusCode, 200)
+    assert.ok(dashboard.json().appointments.length > 0)
+
+    const patients = await dentistApp.inject({ url: '/api/dentist/patients?q=Patricia', headers: { cookie } })
+    assert.equal(patients.statusCode, 200)
+    assert.equal(patients.json().patients[0].patientNumber, dentistStore.patient.patientNumber)
+
+    const chart = await dentistApp.inject({ url: `/api/dentist/patients/${dentistStore.patient.id}`, headers: { cookie } })
+    assert.equal(chart.statusCode, 200)
+    assert.equal(chart.json().patient.allergies, 'Penicillin')
+
+    const invalidImage = await dentistApp.inject({
+      method: 'POST',
+      url: `/api/dentist/patients/${dentistStore.patient.id}/prescriptions`,
+      headers: { origin: config.publicOrigin, cookie },
+      payload: {
+        prescribedOn: '2030-01-01',
+        genericName: 'Amoxicillin',
+        instructions: 'Take as directed.',
+        imageMimeType: 'image/png',
+        imageOriginalName: 'prescription.png',
+        imageBase64: Buffer.from('not-an-image').toString('base64'),
+      },
+    })
+    assert.equal(invalidImage.statusCode, 400)
+
+    const imageBytes = Buffer.from('89504e470d0a1a0a', 'hex')
+    const uploaded = await dentistApp.inject({
+      method: 'POST',
+      url: `/api/dentist/patients/${dentistStore.patient.id}/prescriptions`,
+      headers: { origin: config.publicOrigin, cookie },
+      payload: {
+        prescribedOn: '2030-01-01',
+        genericName: 'Amoxicillin',
+        instructions: 'Take as directed.',
+        imageMimeType: 'image/png',
+        imageOriginalName: '../../prescription.png',
+        imageBase64: imageBytes.toString('base64'),
+      },
+    })
+    assert.equal(uploaded.statusCode, 201, uploaded.body)
+    assert.equal(dentistStore.prescriptions[0].imageOriginalName, 'prescription.png')
+
+    const prescriptionImage = await dentistApp.inject({
+      url: `/api/dentist/prescriptions/${uploaded.json().prescriptionId}/image`,
+      headers: { cookie },
+    })
+    assert.equal(prescriptionImage.statusCode, 200)
+    assert.equal(prescriptionImage.headers['content-type'], 'image/png')
+    assert.deepEqual(prescriptionImage.rawPayload, imageBytes)
+
+    const followUp = await dentistApp.inject({
+      method: 'POST',
+      url: `/api/dentist/patients/${dentistStore.patient.id}/follow-ups`,
+      headers: { origin: config.publicOrigin, cookie },
+      payload: {
+        recommendedOn: '2030-01-02',
+        appointmentTypeId: dentistStore.services[0].id,
+        notes: 'Return for cleaning.',
+      },
+    })
+    assert.equal(followUp.statusCode, 201)
+    assert.equal(dentistStore.followUps[0].notes, 'Return for cleaning.')
+
+    const receptionDashboard = await dentistApp.inject({ url: '/api/staff/dashboard', headers: { cookie } })
+    assert.equal(receptionDashboard.statusCode, 403)
+  } finally {
+    await dentistApp.close()
+  }
+})
+
 test('patient endpoints require authentication and enforce patient ownership and publication', async () => {
   const unauthenticated = await app.inject({ url: '/api/me/appointments' })
   assert.equal(unauthenticated.statusCode, 401)
@@ -1342,6 +1519,10 @@ test('SPA deep links return the React application while unknown API routes stay 
     const receptionLink = await staticApp.inject({ url: '/reception/calendar' })
     assert.equal(receptionLink.statusCode, 200)
     assert.match(receptionLink.body, /id="root"/)
+
+    const dentistLink = await staticApp.inject({ url: '/dentist' })
+    assert.equal(dentistLink.statusCode, 200)
+    assert.match(dentistLink.body, /id="root"/)
 
     const missingApi = await staticApp.inject({ url: '/api/does-not-exist' })
     assert.equal(missingApi.statusCode, 404)

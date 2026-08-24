@@ -126,4 +126,18 @@ export const api = {
     method: 'PATCH',
     body: json(details),
   }),
+  getDentistDashboard: () => request('/api/dentist/dashboard'),
+  searchDentistPatients: (query) =>
+    request(`/api/dentist/patients?q=${encodeURIComponent(query)}`),
+  getDentistPatient: (id) => request(`/api/dentist/patients/${id}`),
+  uploadDentistPrescription: (patientId, details) =>
+    request(`/api/dentist/patients/${patientId}/prescriptions`, {
+      method: 'POST',
+      body: json(details),
+    }),
+  createDentistFollowUp: (patientId, details) =>
+    request(`/api/dentist/patients/${patientId}/follow-ups`, {
+      method: 'POST',
+      body: json(details),
+    }),
 }

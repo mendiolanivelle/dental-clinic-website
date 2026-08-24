@@ -15,6 +15,7 @@ import authRoutes from './routes/auth.js'
 import healthRoutes from './routes/health.js'
 import patientRoutes from './routes/patient.js'
 import staffRoutes from './routes/staff.js'
+import dentistRoutes from './routes/dentist.js'
 import { createStaffCredentialVerifier } from './staff-auth.js'
 
 const defaultStaticDirectory = fileURLToPath(new URL('../dist/', import.meta.url))
@@ -137,6 +138,7 @@ export async function buildApp({
     if (
       request.url.startsWith('/api/auth/') ||
       request.url.startsWith('/api/staff/') ||
+      request.url.startsWith('/api/dentist/') ||
       request.url === '/api/me' ||
       request.url.startsWith('/api/me/')
     ) {
@@ -163,6 +165,7 @@ export async function buildApp({
     verifyStaffCredentials:
       verifyStaffCredentials || createStaffCredentialVerifier(config),
   })
+  await app.register(dentistRoutes, { store, config, now })
 
   const hasStaticFiles = Boolean(staticDir && existsSync(path.join(staticDir, 'index.html')))
   if (hasStaticFiles) {
@@ -186,7 +189,8 @@ export async function buildApp({
       (request.url === '/' ||
         request.url.startsWith('/login') ||
         request.url.startsWith('/portal') ||
-        request.url.startsWith('/reception'))
+        request.url.startsWith('/reception') ||
+        request.url.startsWith('/dentist'))
     ) {
       return reply.type('text/html').sendFile('index.html')
     }

@@ -85,6 +85,10 @@ test('the backend role stays least-privilege and the forward migration removes O
     new URL('../migrations/011_checkout_clinical_records.sql', import.meta.url),
     'utf8',
   )
+  const dentistPortalSql = await readFile(
+    new URL('../migrations/012_dentist_portal.sql', import.meta.url),
+    'utf8',
+  )
   const compact = securitySql.replace(/\s+/g, ' ')
 
   assert.doesNotMatch(securitySql, /\bDELETE\b/)
@@ -147,6 +151,13 @@ test('the backend role stays least-privilege and the forward migration removes O
   assert.match(paymentsSql, /GRANT SELECT, INSERT, UPDATE[\s\S]*patient_charges[\s\S]*patient_payments/i)
   assert.doesNotMatch(paymentsSql, /\bDELETE\b/i)
   assert.doesNotMatch(paymentsSql, /card_number|cvv|expiry/i)
+  assert.match(dentistPortalSql, /ADD COLUMN dentist_id uuid REFERENCES dental_portal\.dentists\(id\)/i)
+  assert.match(dentistPortalSql, /CREATE TABLE dental_portal\.prescriptions/i)
+  assert.match(dentistPortalSql, /image_byte_size integer NOT NULL CHECK \(image_byte_size BETWEEN 1 AND 5242880\)/i)
+  assert.match(dentistPortalSql, /CREATE TABLE dental_portal\.follow_up_recommendations/i)
+  assert.match(dentistPortalSql, /GRANT SELECT, INSERT[\s\S]*prescriptions[\s\S]*follow_up_recommendations/i)
+  assert.doesNotMatch(dentistPortalSql, /GRANT[^;]*\b(?:anon|authenticated|service_role)\b/i)
+  assert.doesNotMatch(dentistPortalSql, /\bDELETE\b/i)
 })
 
 test('production permits Supabase direct/session connections and rejects other hosts or transaction pooling', () => {

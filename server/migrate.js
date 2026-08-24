@@ -22,6 +22,8 @@ export const portalTableNames = [
   'staff_sessions',
   'patient_charges',
   'patient_payments',
+  'prescriptions',
+  'follow_up_recommendations',
   'audit_events',
 ]
 
