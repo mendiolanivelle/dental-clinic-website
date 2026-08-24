@@ -64,6 +64,7 @@ export const api = {
   getMe: ({ notifyUnauthorized = true } = {}) => request('/api/me', { notifyUnauthorized }),
   getDashboard: () => request('/api/me/dashboard'),
   getServices: () => request('/api/me/services'),
+  getAvailability: (date) => request(`/api/me/availability?date=${encodeURIComponent(date)}`),
   getAppointmentRequests: () => request('/api/me/appointment-requests'),
   createAppointmentRequest: (details) => request('/api/me/appointment-requests', {
     method: 'POST',

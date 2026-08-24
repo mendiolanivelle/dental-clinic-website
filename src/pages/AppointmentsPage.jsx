@@ -105,19 +105,45 @@ function AppointmentCard({ value, upcoming }) {
 
 function BookingRequestForm({ services, selectedServiceId, onServiceChange, onCreated }) {
   const [preferredDate, setPreferredDate] = useState('')
-  const [timePreference, setTimePreference] = useState('any')
+  const [slots, setSlots] = useState([])
+  const [selectedSlotKey, setSelectedSlotKey] = useState('')
+  const [loadingSlots, setLoadingSlots] = useState(false)
+  const [slotError, setSlotError] = useState('')
   const [patientNote, setPatientNote] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
-  const today = new Date().toISOString().slice(0, 10)
+  const today = new Date(Date.now() + 8 * 60 * 60_000).toISOString().slice(0, 10)
+  const slotKey = (slot) => `${slot.dentistId}|${slot.startsAt}`
+  const selectedSlot = slots.find((slot) => slotKey(slot) === selectedSlotKey)
+
+  useEffect(() => {
+    setSlots([])
+    setSelectedSlotKey('')
+    setSlotError('')
+    if (!preferredDate) return undefined
+
+    let active = true
+    setLoadingSlots(true)
+    api.getAvailability(preferredDate)
+      .then((result) => {
+        if (active) setSlots(listFrom(result, 'slots'))
+      })
+      .catch((requestError) => {
+        if (active) setSlotError(requestError.message || 'Available times could not be loaded.')
+      })
+      .finally(() => {
+        if (active) setLoadingSlots(false)
+      })
+    return () => { active = false }
+  }, [preferredDate])
 
   async function handleSubmit(event) {
     event.preventDefault()
     setError('')
     setSuccess('')
-    if (!selectedServiceId || !preferredDate) {
-      setError('Choose a service and preferred date to continue.')
+    if (!selectedServiceId || !preferredDate || !selectedSlot) {
+      setError('Choose a service, date, and available appointment time to continue.')
       return
     }
 
@@ -125,16 +151,15 @@ function BookingRequestForm({ services, selectedServiceId, onServiceChange, onCr
     try {
       const result = await api.createAppointmentRequest({
         appointmentTypeId: selectedServiceId,
-        preferredDate,
-        timePreference,
+        dentistId: selectedSlot.dentistId,
+        startsAt: selectedSlot.startsAt,
         patientNote,
       })
       const appointmentRequest = appointmentRequestView(result?.appointmentRequest || result)
       onCreated(appointmentRequest)
       setPreferredDate('')
-      setTimePreference('any')
       setPatientNote('')
-      setSuccess('Your appointment request was sent. The clinic will confirm the available date and time.')
+      setSuccess('Your appointment request was sent for the selected doctor and one-hour time slot.')
     } catch (requestError) {
       setError(requestError.message || 'We could not send your appointment request. Please try again.')
     } finally {
@@ -148,7 +173,7 @@ function BookingRequestForm({ services, selectedServiceId, onServiceChange, onCr
         <p className="text-xs font-extrabold uppercase tracking-[.18em] text-brand/60">Request a visit</p>
         <h2 id="booking-heading" className="mt-1 text-xl font-extrabold">Book an appointment</h2>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-ink/50">
-          Tell us what care you need and when you would prefer to come in. Your request is not confirmed until the clinic reviews it.
+          Choose a date to see each doctor’s live one-hour schedule. Booked times are disabled, and the clinic will confirm your request.
         </p>
       </div>
 
@@ -196,34 +221,58 @@ function BookingRequestForm({ services, selectedServiceId, onServiceChange, onCr
             </div>
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <label className="mb-2 block text-sm font-extrabold" htmlFor="time-preference">Preferred time</label>
-              <select
-                id="time-preference"
-                className="w-full rounded-2xl border border-ink/10 bg-cream/45 px-4 py-3 text-sm font-semibold text-ink outline-none transition focus:border-brand/40 focus:bg-white focus:ring-4 focus:ring-brand/10"
-                value={timePreference}
-                onChange={(event) => setTimePreference(event.target.value)}
-                disabled={submitting}
-              >
-                <option value="any">Any time</option>
-                <option value="morning">Morning</option>
-                <option value="afternoon">Afternoon</option>
-              </select>
-            </div>
-            <div>
-              <label className="mb-2 block text-sm font-extrabold" htmlFor="patient-note">Note for the clinic <span className="font-normal text-ink/40">(optional)</span></label>
-              <input
-                id="patient-note"
-                className="w-full rounded-2xl border border-ink/10 bg-cream/45 px-4 py-3 text-sm text-ink outline-none transition focus:border-brand/40 focus:bg-white focus:ring-4 focus:ring-brand/10"
-                type="text"
-                maxLength={1000}
-                placeholder="Anything we should know?"
-                value={patientNote}
-                onChange={(event) => setPatientNote(event.target.value)}
-                disabled={submitting}
-              />
-            </div>
+          {preferredDate && (
+            <fieldset>
+              <legend className="mb-2 text-sm font-extrabold">Available one-hour times</legend>
+              <p className="mb-3 text-xs leading-5 text-ink/45">Monday–Saturday, 9:00 AM–5:00 PM · Manila time</p>
+              {loadingSlots ? (
+                <p className="rounded-2xl bg-cream/60 p-4 text-sm text-ink/50" role="status">Checking doctor schedules…</p>
+              ) : slotError ? (
+                <p className="rounded-2xl bg-[#fff0e7] p-4 text-sm text-[#914b22]" role="alert">{slotError}</p>
+              ) : slots.length ? (
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {slots.map((slot) => {
+                    const key = slotKey(slot)
+                    const selected = key === selectedSlotKey
+                    return (
+                      <button
+                        key={key}
+                        className={`rounded-2xl border p-3 text-left transition ${
+                          selected
+                            ? 'border-brand bg-brand text-white shadow-lg shadow-teal-900/15'
+                            : slot.available
+                              ? 'border-brand/15 bg-mint/45 text-ink hover:border-brand/40 hover:bg-mint'
+                              : 'cursor-not-allowed border-ink/6 bg-ink/5 text-ink/30 line-through'
+                        }`}
+                        type="button"
+                        disabled={!slot.available || submitting}
+                        aria-pressed={selected}
+                        onClick={() => setSelectedSlotKey(key)}
+                      >
+                        <span className="block text-sm font-extrabold">{formatTime(slot.startsAt)} – {formatTime(slot.endsAt)}</span>
+                        <span className="mt-1 block text-[11px] font-semibold">{slot.dentistName}{slot.available ? '' : ' · Unavailable'}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              ) : (
+                <p className="rounded-2xl bg-cream/60 p-4 text-sm text-ink/50">The clinic is closed or no doctor schedule is available on this date.</p>
+              )}
+            </fieldset>
+          )}
+
+          <div>
+            <label className="mb-2 block text-sm font-extrabold" htmlFor="patient-note">Note for the clinic <span className="font-normal text-ink/40">(optional)</span></label>
+            <input
+              id="patient-note"
+              className="w-full rounded-2xl border border-ink/10 bg-cream/45 px-4 py-3 text-sm text-ink outline-none transition focus:border-brand/40 focus:bg-white focus:ring-4 focus:ring-brand/10"
+              type="text"
+              maxLength={1000}
+              placeholder="Anything we should know?"
+              value={patientNote}
+              onChange={(event) => setPatientNote(event.target.value)}
+              disabled={submitting}
+            />
           </div>
 
           {error && <p className="rounded-2xl bg-[#fff0e7] px-4 py-3 text-sm leading-6 text-[#914b22]" role="alert">{error}</p>}
@@ -247,7 +296,9 @@ function AppointmentRequestCard({ value }) {
         <div>
           <h3 className="text-sm font-extrabold">{request.serviceName}</h3>
           <p className="mt-1 text-xs text-ink/50">
-            Preferred: {formatDate(request.preferredDate)} · {timePreferenceLabels[request.timePreference] || titleCase(request.timePreference)}
+            {request.requestedStartAt
+              ? `${formatDate(request.requestedStartAt, { weekday: 'long' })} · ${formatTime(request.requestedStartAt)} – ${formatTime(request.requestedEndAt)}${request.dentistName ? ` · ${request.dentistName}` : ''}`
+              : `Preferred: ${formatDate(request.preferredDate)} · ${timePreferenceLabels[request.timePreference] || titleCase(request.timePreference)}`}
           </p>
         </div>
         <span className={`self-start rounded-full px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wide sm:self-auto ${requestStatusColors[request.status] || 'bg-cream text-ink/55'}`}>

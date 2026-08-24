@@ -25,6 +25,10 @@ class MemoryStore {
       enabled: true,
     }
     this.otherPatientId = '10000000-0000-4000-8000-000000000002'
+    this.dentist = {
+      id: '20000000-0000-4000-8000-000000000001',
+      displayName: 'Dr. Andrea Sample',
+    }
     this.services = [
       {
         id: '60000000-0000-4000-8000-000000000001',
@@ -48,6 +52,7 @@ class MemoryStore {
         startsAt: '2030-01-01T02:00:00.000Z',
         endsAt: '2030-01-01T02:30:00.000Z',
         status: 'confirmed',
+        dentistId: this.dentist.id,
         dentistName: 'Dr. Andrea Sample',
         patientInstructions: 'Arrive early.',
       },
@@ -182,16 +187,50 @@ class MemoryStore {
       .map(({ patientId: _patientId, ...request }) => request)
   }
 
+  async listAvailability(date, now) {
+    const day = new Date(`${date}T00:00:00Z`).getUTCDay()
+    if (day === 0) return []
+    return Array.from({ length: 8 }, (_, index) => {
+      const startsAt = new Date(`${date}T${String(index + 1).padStart(2, '0')}:00:00.000Z`)
+      const endsAt = new Date(startsAt.getTime() + 60 * 60_000)
+      const busyAppointment = this.appointments.some((appointment) =>
+        appointment.dentistId === this.dentist.id &&
+        ['scheduled', 'confirmed'].includes(appointment.status) &&
+        new Date(appointment.startsAt) < endsAt &&
+        new Date(appointment.endsAt) > startsAt)
+      const busyRequest = this.appointmentRequests.some((request) =>
+        request.dentistId === this.dentist.id &&
+        ['requested', 'confirmed'].includes(request.status) &&
+        request.requestedStartAt === startsAt.toISOString())
+      return {
+        dentistId: this.dentist.id,
+        dentistName: this.dentist.displayName,
+        startsAt: startsAt.toISOString(),
+        endsAt: endsAt.toISOString(),
+        available: startsAt > now && !busyAppointment && !busyRequest,
+      }
+    })
+  }
+
   async createAppointmentRequest(input) {
     const service = this.services.find((item) => item.id === input.appointmentTypeId)
-    if (!service) return null
+    const slot = (await this.listAvailability(input.startsAt.slice(0, 10), input.now))
+      .find((item) =>
+        item.dentistId === input.dentistId &&
+        item.startsAt === input.startsAt &&
+        item.available)
+    if (!service || !slot) return null
     const request = {
       patientId: input.patientId,
       id: '70000000-0000-4000-8000-000000000001',
       serviceId: service.id,
       serviceName: service.name,
-      preferredDate: input.preferredDate,
-      timePreference: input.timePreference,
+      dentistId: slot.dentistId,
+      dentistName: slot.dentistName,
+      requestedStartAt: slot.startsAt,
+      requestedEndAt: slot.endsAt,
+      preferredDate: new Date(new Date(slot.startsAt).getTime() + 8 * 60 * 60_000).toISOString().slice(0, 10),
+      timePreference: new Date(slot.startsAt).getUTCHours() < 4 ? 'morning' : 'afternoon',
       patientNote: input.patientNote,
       status: 'requested',
       clinicNote: null,
@@ -470,14 +509,27 @@ test('patient endpoints require authentication and enforce patient ownership and
   assert.equal(services.statusCode, 200)
   assert.deepEqual(services.json().services.map(({ name }) => name), ['Cleaning', 'Brace Adjustment'])
 
+  const availability = await app.inject({
+    url: '/api/me/availability?date=2030-01-01',
+    headers: { cookie },
+  })
+  assert.equal(availability.statusCode, 200)
+  assert.equal(availability.json().slotMinutes, 60)
+  assert.equal(availability.json().timezone, 'Asia/Manila')
+  assert.equal(availability.json().slots.length, 8)
+  assert.equal(
+    availability.json().slots.find(({ startsAt }) => startsAt === '2030-01-01T02:00:00.000Z').available,
+    false,
+  )
+
   const createdRequest = await app.inject({
     method: 'POST',
     url: '/api/me/appointment-requests',
     headers: { origin: config.publicOrigin, cookie },
     payload: {
       appointmentTypeId: '60000000-0000-4000-8000-000000000001',
-      preferredDate: '2026-08-01',
-      timePreference: 'morning',
+      dentistId: '20000000-0000-4000-8000-000000000001',
+      startsAt: '2030-01-01T01:00:00.000Z',
       patientNote: 'Sensitive tooth on the left side.',
     },
   })
@@ -486,13 +538,30 @@ test('patient endpoints require authentication and enforce patient ownership and
     id: '70000000-0000-4000-8000-000000000001',
     serviceId: '60000000-0000-4000-8000-000000000001',
     serviceName: 'Cleaning',
-    preferredDate: '2026-08-01',
+    dentistId: '20000000-0000-4000-8000-000000000001',
+    dentistName: 'Dr. Andrea Sample',
+    requestedStartAt: '2030-01-01T01:00:00.000Z',
+    requestedEndAt: '2030-01-01T02:00:00.000Z',
+    preferredDate: '2030-01-01',
     timePreference: 'morning',
     patientNote: 'Sensitive tooth on the left side.',
     status: 'requested',
     clinicNote: null,
     createdAt: currentTime.toISOString(),
   })
+
+  const duplicateRequest = await app.inject({
+    method: 'POST',
+    url: '/api/me/appointment-requests',
+    headers: { origin: config.publicOrigin, cookie },
+    payload: {
+      appointmentTypeId: '60000000-0000-4000-8000-000000000002',
+      dentistId: '20000000-0000-4000-8000-000000000001',
+      startsAt: '2030-01-01T01:00:00.000Z',
+    },
+  })
+  assert.equal(duplicateRequest.statusCode, 409)
+  assert.equal(duplicateRequest.json().error.code, 'SLOT_UNAVAILABLE')
 
   const requestList = await app.inject({
     url: '/api/me/appointment-requests',

@@ -24,9 +24,9 @@ Patients can view:
 - their active published treatment plan.
 
 Patients can also browse the clinic's dental service catalog from the overview
-and submit an appointment request with a selected service, preferred date, and
-time preference. A request is not an automatic confirmation; clinic staff must
-review and confirm the actual dentist and time slot.
+and submit an appointment request from the live hourly doctor calendar. The
+initial schedule is Monday–Saturday, 9:00 AM–5:00 PM Manila time. A request is
+not an automatic confirmation; clinic staff must review it.
 
 ## 2. Security boundary
 
@@ -203,6 +203,7 @@ POST /api/auth/logout
 GET  /api/me
 GET  /api/me/dashboard
 GET  /api/me/services
+GET  /api/me/availability?date=YYYY-MM-DD
 GET  /api/me/appointments?scope=upcoming|past
 GET  /api/me/appointments/:id
 GET  /api/me/appointment-requests
@@ -290,9 +291,10 @@ All appointment, record, and treatment-plan queries include the authenticated
 
 Appointment-request list and create operations derive `patient_id` from the
 authenticated session. The create operation accepts only an approved
-`appointmentTypeId`, a future `preferredDate`, `timePreference` (`any`,
-`morning`, or `afternoon`), and an optional patient note. It creates status
-`requested`; it must never create a confirmed appointment directly.
+`appointmentTypeId`, active `dentistId`, exact available `startsAt`, and an
+optional patient note. The server rechecks scheduled/confirmed appointments
+and active requests before inserting status `requested`; it must never create
+a confirmed appointment directly.
 
 Never accept `patientId` in a request body, path, or query string as an
 authorization selector. A valid UUID belonging to another patient must return
@@ -448,8 +450,9 @@ must verify the Supabase CA and hostname. Never set
 - Authentication and patient endpoints include `Cache-Control: no-store`.
 - Services are visible only through authenticated patient endpoints, and a
   patient can list or create only their own appointment requests.
-- Booking requests preserve the selected service, preferred timing, status,
-  and patient note; they do not silently create a scheduled appointment.
+- Booking requests preserve the selected service, dentist, exact one-hour
+  slot, status, and patient note; they do not silently create a scheduled
+  appointment or double-reserve an active doctor slot.
 - State-changing requests without the configured origin return `403`.
 - Logs contain no request body, cookie, token, full name, patient ID, or
   clinical content.

@@ -37,12 +37,24 @@ const appointmentRequestFromRow = (row) => ({
   id: row.id,
   serviceId: row.appointment_type_id,
   serviceName: row.service_name,
+  dentistId: row.dentist_id,
+  dentistName: row.dentist_name,
+  requestedStartAt: row.requested_start_at,
+  requestedEndAt: row.requested_end_at,
   preferredDate: row.preferred_date,
   timePreference: row.time_preference,
   patientNote: row.patient_note,
   status: row.status,
   clinicNote: row.status === 'confirmed' || row.status === 'declined' ? row.clinic_note : null,
   createdAt: row.created_at,
+})
+
+const availabilitySlotFromRow = (row) => ({
+  dentistId: row.dentist_id,
+  dentistName: row.dentist_name,
+  startsAt: row.starts_at,
+  endsAt: row.ends_at,
+  available: row.available,
 })
 
 const appointmentSelect = `
@@ -68,10 +80,13 @@ const treatmentPlanSelect = `
 
 const appointmentRequestSelect = `
   SELECT r.id, r.appointment_type_id, t.name AS service_name,
+         r.dentist_id, d.display_name AS dentist_name,
+         r.requested_start_at, r.requested_end_at,
          r.preferred_date, r.time_preference, r.patient_note,
          r.status, r.clinic_note, r.created_at
   FROM appointment_requests r
   JOIN appointment_types t ON t.id = r.appointment_type_id
+  LEFT JOIN dentists d ON d.id = r.dentist_id
 `
 
 export function createStore(db) {
@@ -159,6 +174,46 @@ export function createStore(db) {
       [patientId],
     )
     return result.rows.map(appointmentRequestFromRow)
+  }
+
+  const listAvailability = async (date, now) => {
+    const result = await db.query(
+      `WITH slots AS (
+         SELECT generate_series(
+           (($1::date + time '09:00') AT TIME ZONE 'Asia/Manila'),
+           (($1::date + time '16:00') AT TIME ZONE 'Asia/Manila'),
+           interval '1 hour'
+         ) AS starts_at
+         WHERE EXTRACT(ISODOW FROM $1::date) BETWEEN 1 AND 6
+       )
+       SELECT d.id AS dentist_id, d.display_name AS dentist_name,
+              slots.starts_at, slots.starts_at + interval '1 hour' AS ends_at,
+              (
+                slots.starts_at > $2
+                AND NOT EXISTS (
+                  SELECT 1
+                  FROM appointments a
+                  WHERE a.dentist_id = d.id
+                    AND a.status IN ('scheduled', 'confirmed')
+                    AND a.starts_at < slots.starts_at + interval '1 hour'
+                    AND a.ends_at > slots.starts_at
+                )
+                AND NOT EXISTS (
+                  SELECT 1
+                  FROM appointment_requests r
+                  WHERE r.dentist_id = d.id
+                    AND r.status IN ('requested', 'confirmed')
+                    AND r.requested_start_at < slots.starts_at + interval '1 hour'
+                    AND r.requested_end_at > slots.starts_at
+                )
+              ) AS available
+       FROM dentists d
+       CROSS JOIN slots
+       WHERE d.active = true
+       ORDER BY slots.starts_at ASC, d.display_name ASC`,
+      [date, now],
+    )
+    return result.rows.map(availabilitySlotFromRow)
   }
 
   return {
@@ -257,6 +312,7 @@ export function createStore(db) {
     addAudit,
     listServices,
     listAppointmentRequests,
+    listAvailability,
     listAppointments,
     listRecords,
     getTreatmentPlan,
@@ -264,27 +320,69 @@ export function createStore(db) {
     async createAppointmentRequest({
       patientId,
       appointmentTypeId,
-      preferredDate,
-      timePreference,
+      dentistId,
+      startsAt,
       patientNote,
       now,
     }) {
       const result = await db.query(
-        `WITH inserted AS (
+        `WITH selected AS (
+           SELECT t.id AS appointment_type_id, d.id AS dentist_id
+           FROM appointment_types t
+           CROSS JOIN dentists d
+           WHERE t.id = $2
+             AND d.id = $3
+             AND d.active = true
+         ), inserted AS (
            INSERT INTO appointment_requests (
-             patient_id, appointment_type_id, preferred_date,
+             patient_id, appointment_type_id, dentist_id,
+             requested_start_at, requested_end_at, preferred_date,
              time_preference, patient_note, status, created_at, updated_at
            )
-           SELECT $1, t.id, $3, $4, $5, 'requested', $6, $6
-           FROM appointment_types t
-           WHERE t.id = $2
-           RETURNING id, appointment_type_id, preferred_date, time_preference,
-                     patient_note, status, clinic_note, created_at
+           SELECT $1, selected.appointment_type_id, selected.dentist_id,
+                  $4::timestamptz, $4::timestamptz + interval '1 hour',
+                  ($4::timestamptz AT TIME ZONE 'Asia/Manila')::date,
+                  CASE
+                    WHEN EXTRACT(HOUR FROM $4::timestamptz AT TIME ZONE 'Asia/Manila') < 12
+                    THEN 'morning'
+                    ELSE 'afternoon'
+                  END,
+                  $5, 'requested', $6, $6
+           FROM selected
+           WHERE $4::timestamptz > $6
+             AND EXTRACT(ISODOW FROM $4::timestamptz AT TIME ZONE 'Asia/Manila') BETWEEN 1 AND 6
+             AND ($4::timestamptz AT TIME ZONE 'Asia/Manila')::time >= time '09:00'
+             AND ($4::timestamptz AT TIME ZONE 'Asia/Manila')::time < time '17:00'
+             AND EXTRACT(MINUTE FROM $4::timestamptz AT TIME ZONE 'Asia/Manila') = 0
+             AND EXTRACT(SECOND FROM $4::timestamptz AT TIME ZONE 'Asia/Manila') = 0
+             AND NOT EXISTS (
+               SELECT 1
+               FROM appointments a
+               WHERE a.dentist_id = selected.dentist_id
+                 AND a.status IN ('scheduled', 'confirmed')
+                 AND a.starts_at < $4::timestamptz + interval '1 hour'
+                 AND a.ends_at > $4::timestamptz
+             )
+             AND NOT EXISTS (
+               SELECT 1
+               FROM appointment_requests r
+               WHERE r.dentist_id = selected.dentist_id
+                 AND r.status IN ('requested', 'confirmed')
+                 AND r.requested_start_at < $4::timestamptz + interval '1 hour'
+                 AND r.requested_end_at > $4::timestamptz
+             )
+           ON CONFLICT (dentist_id, requested_start_at)
+             WHERE dentist_id IS NOT NULL AND status IN ('requested', 'confirmed')
+             DO NOTHING
+           RETURNING id, appointment_type_id, dentist_id,
+                     requested_start_at, requested_end_at, preferred_date,
+                     time_preference, patient_note, status, clinic_note, created_at
          )
-         SELECT inserted.*, t.name AS service_name
+         SELECT inserted.*, t.name AS service_name, d.display_name AS dentist_name
          FROM inserted
-         JOIN appointment_types t ON t.id = inserted.appointment_type_id`,
-        [patientId, appointmentTypeId, preferredDate, timePreference, patientNote, now],
+         JOIN appointment_types t ON t.id = inserted.appointment_type_id
+         JOIN dentists d ON d.id = inserted.dentist_id`,
+        [patientId, appointmentTypeId, dentistId, startsAt, patientNote, now],
       )
       return result.rowCount ? appointmentRequestFromRow(result.rows[0]) : null
     },

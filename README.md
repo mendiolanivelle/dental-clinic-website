@@ -3,7 +3,7 @@
 A patient portal built with React, Vite, Tailwind CSS, Fastify, and
 Supabase-hosted PostgreSQL. Patients sign in with the full name recorded by the
 clinic and their clinic-issued patient ID. They can browse the clinic service
-catalog and submit appointment requests with a preferred date and time. There
+catalog and choose an open doctor time from the hourly appointment calendar. There
 is no registration, password, SMS, or one-time-code step.
 
 > Direct login is intentionally simple. In production, patient IDs must be
@@ -66,9 +66,10 @@ patient ownership, published-record rules, response `no-store` headers, request
 body redaction, and audit events for login and protected record access.
 Supabase's browser SDK and Data API are not used.
 
-Appointment requests are intentionally not automatic confirmations. A patient
-selects a service and preferred timing, then the clinic reviews the request and
-confirms the available dentist and appointment slot.
+Appointment requests are intentionally not automatic confirmations. The
+calendar uses active dentists and hides conflicts with scheduled, confirmed,
+or already-requested visits. The initial clinic schedule is Monday–Saturday,
+9:00 AM–5:00 PM Manila time, in one-hour slots.
 
 ## Verification
 

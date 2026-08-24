@@ -17,14 +17,25 @@ const idParams = {
 const appointmentRequestBody = {
   type: 'object',
   additionalProperties: false,
-  required: ['appointmentTypeId', 'preferredDate', 'timePreference'],
+  required: ['appointmentTypeId', 'dentistId', 'startsAt'],
   properties: {
     appointmentTypeId: { type: 'string', format: 'uuid' },
-    preferredDate: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
-    timePreference: { type: 'string', enum: ['any', 'morning', 'afternoon'] },
+    dentistId: { type: 'string', format: 'uuid' },
+    startsAt: { type: 'string', format: 'date-time' },
     patientNote: { type: 'string', maxLength: 1000 },
   },
 }
+
+const availabilityQuery = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['date'],
+  properties: {
+    date: { type: 'string', format: 'date' },
+  },
+}
+
+const manilaDate = (date) => new Date(date.getTime() + 8 * 60 * 60_000).toISOString().slice(0, 10)
 
 export default async function patientRoutes(app, { store, config, now }) {
   const audited = async (request, action, objectType = null, objectId = null) => {
@@ -69,13 +80,11 @@ export default async function patientRoutes(app, { store, config, now }) {
     return { appointmentRequests }
   })
 
-  app.post(
-    '/api/me/appointment-requests',
-    { preHandler: app.authenticate, schema: { body: appointmentRequestBody } },
+  app.get(
+    '/api/me/availability',
+    { preHandler: app.authenticate, schema: { querystring: availabilityQuery } },
     async (request, reply) => {
-      const { appointmentTypeId, preferredDate, timePreference, patientNote = '' } = request.body
-      const today = now().toISOString().slice(0, 10)
-      if (preferredDate < today) {
+      if (request.query.date < manilaDate(now())) {
         return reply.code(400).send({
           error: {
             code: 'INVALID_DATE',
@@ -83,20 +92,36 @@ export default async function patientRoutes(app, { store, config, now }) {
           },
         })
       }
+      const slots = await store.listAvailability(request.query.date, now())
+      await audited(request, 'portal.availability_viewed')
+      return {
+        date: request.query.date,
+        timezone: 'Asia/Manila',
+        slotMinutes: 60,
+        slots,
+      }
+    },
+  )
+
+  app.post(
+    '/api/me/appointment-requests',
+    { preHandler: app.authenticate, schema: { body: appointmentRequestBody } },
+    async (request, reply) => {
+      const { appointmentTypeId, dentistId, startsAt, patientNote = '' } = request.body
 
       const appointmentRequest = await store.createAppointmentRequest({
         patientId: request.patient.id,
         appointmentTypeId,
-        preferredDate,
-        timePreference,
+        dentistId,
+        startsAt,
         patientNote: patientNote.trim() || null,
         now: now(),
       })
       if (!appointmentRequest) {
-        return reply.code(400).send({
+        return reply.code(409).send({
           error: {
-            code: 'INVALID_SERVICE',
-            message: 'Please choose a service from the clinic catalog.',
+            code: 'SLOT_UNAVAILABLE',
+            message: 'That appointment time is no longer available. Please choose another slot.',
           },
         })
       }
