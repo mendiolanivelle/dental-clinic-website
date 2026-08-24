@@ -203,6 +203,7 @@ export default function ReceptionBillingPage() {
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2"><h3 className="font-extrabold">{charge.patient.displayName}</h3><span className="rounded-full bg-cream px-2.5 py-1 text-[10px] font-extrabold uppercase text-ink/55">{titleCase(charge.status)}</span></div>
               <p className="mt-1 text-sm text-ink/50">{charge.description} · {charge.dentistName} · {recordLabel(charge.recordNumber)}</p>
+              <p className="mt-1 text-xs font-bold text-brand/65">Checkout handled by {charge.handledBy}</p>
               <p className="mt-2 text-xs text-ink/40">Total {formatCurrency(charge.totalCents)} · Paid {formatCurrency(charge.paidCents)} · Balance <strong>{formatCurrency(charge.balanceCents)}</strong>{charge.invoiceReference ? ` · Invoice ${charge.invoiceReference}` : ''}</p>
             </div>
             {charge.balanceCents > 0 && <button className="rounded-xl border border-brand/15 px-4 py-2.5 text-xs font-extrabold text-brand hover:bg-mint" type="button" onClick={() => { setPayingCharge(charge.id); setAmount((charge.balanceCents / 100).toFixed(2)); setMethod('cash'); setReference(''); setFormError('') }}>Add payment</button>}
@@ -213,7 +214,7 @@ export default function ReceptionBillingPage() {
           </form>}
           {!!charge.payments.length && <div className="mt-5 border-t border-ink/5 pt-4">
             {charge.payments.map((payment) => <div className={`flex flex-col gap-2 py-2 text-xs sm:flex-row sm:items-center ${payment.status === 'voided' ? 'text-ink/35 line-through' : 'text-ink/55'}`} key={payment.id}>
-              <ReceiptText className="shrink-0 text-brand" size={15} /><span className="font-extrabold">{formatCurrency(payment.amountCents)}</span><span>{titleCase(payment.method)}</span><span>{formatDate(payment.receivedAt)} at {formatTime(payment.receivedAt)}</span>{payment.reference && <span>Ref: {payment.reference}</span>}<span className="sm:ml-auto">{titleCase(payment.status)}</span>{payment.status === 'posted' && <button aria-label="Void payment" className="inline-flex items-center gap-1 font-extrabold text-[#9a4e22] no-underline" disabled={busy} type="button" onClick={() => voidPayment(payment)}><RotateCcw size={13} /> Void</button>}
+              <ReceiptText className="shrink-0 text-brand" size={15} /><span className="font-extrabold">{formatCurrency(payment.amountCents)}</span><span>{titleCase(payment.method)}</span><span>{formatDate(payment.receivedAt)} at {formatTime(payment.receivedAt)}</span><span>Recorded by {payment.recordedBy}</span>{payment.reference && <span>Ref: {payment.reference}</span>}<span className="sm:ml-auto">{titleCase(payment.status)}</span>{payment.status === 'posted' && <button aria-label="Void payment" className="inline-flex items-center gap-1 font-extrabold text-[#9a4e22] no-underline" disabled={busy} type="button" onClick={() => voidPayment(payment)}><RotateCcw size={13} /> Void</button>}
             </div>)}
           </div>}
         </article>)}

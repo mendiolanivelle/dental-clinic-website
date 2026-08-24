@@ -287,6 +287,7 @@ class MemoryStore {
       status: input.paymentAmountCents === totalCents ? 'paid' : input.paymentAmountCents ? 'partially_paid' : 'unpaid',
       invoiceReference: input.invoiceReference,
       dentistName: appointment.dentistName,
+      handledBy: this.staff.displayName,
       patient: { id: this.patient.id, displayName: this.patient.displayName, patientNumber: this.patient.patientNumber },
       payments: input.paymentAmountCents ? [{
         id: 'b0000000-0000-4000-8000-000000000001',
@@ -295,6 +296,7 @@ class MemoryStore {
         reference: input.paymentReference,
         status: 'posted',
         receivedAt: input.now,
+        recordedBy: this.staff.displayName,
       }] : [],
       paidCents: input.paymentAmountCents,
       balanceCents: totalCents - input.paymentAmountCents,
@@ -315,6 +317,7 @@ class MemoryStore {
       reference: input.reference,
       status: 'posted',
       receivedAt: input.now,
+      recordedBy: this.staff.displayName,
     }
     charge.payments.push(payment)
     charge.paidCents += input.amountCents
@@ -338,9 +341,11 @@ class MemoryStore {
   async listPatientBilling(patientId) {
     return this.charges
       .filter(({ patient }) => patient.id === patientId)
-      .map((charge) => ({
+      .map(({ handledBy: _handledBy, ...charge }) => ({
         ...charge,
-        payments: charge.payments.filter(({ status }) => status === 'posted'),
+        payments: charge.payments
+          .filter(({ status }) => status === 'posted')
+          .map(({ recordedBy: _recordedBy, ...payment }) => payment),
       }))
   }
 
@@ -816,6 +821,8 @@ test('reception staff use a separate protected session and can confirm booking r
     assert.equal(checkout.json().charge.status, 'partially_paid')
     assert.equal(checkout.json().charge.balanceCents, 100000)
     assert.equal(checkout.json().charge.dentistName, 'Dr. Andrea Sample')
+    assert.equal(checkout.json().charge.handledBy, 'Rina Reception')
+    assert.equal(checkout.json().charge.payments[0].recordedBy, 'Rina Reception')
 
     const finalPayment = await staffApp.inject({
       method: 'POST',
@@ -825,6 +832,7 @@ test('reception staff use a separate protected session and can confirm booking r
     })
     assert.equal(finalPayment.statusCode, 201)
     assert.equal(finalPayment.json().charge.status, 'paid')
+    assert.equal(finalPayment.json().charge.payments[1].recordedBy, 'Rina Reception')
 
     const voided = await staffApp.inject({
       method: 'POST',
@@ -844,6 +852,8 @@ test('reception staff use a separate protected session and can confirm booking r
     assert.equal(patientBilling.statusCode, 200)
     assert.equal(patientBilling.json().charges[0].payments.length, 1)
     assert.equal(patientBilling.json().charges[0].balanceCents, 100000)
+    assert.equal('handledBy' in patientBilling.json().charges[0], false)
+    assert.equal('recordedBy' in patientBilling.json().charges[0].payments[0], false)
 
     const confirmed = await staffApp.inject({
       method: 'PATCH',

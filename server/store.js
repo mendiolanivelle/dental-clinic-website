@@ -90,7 +90,7 @@ const receptionAppointmentFromRow = (row) => ({
   },
 })
 
-const chargesFromRows = (rows, includeVoided = true) => {
+const chargesFromRows = (rows, includeVoided = true, includeStaff = true) => {
   const charges = new Map()
   for (const row of rows) {
     if (!charges.has(row.charge_id)) {
@@ -107,6 +107,7 @@ const chargesFromRows = (rows, includeVoided = true) => {
         createdAt: row.charge_created_at,
         appointmentStartsAt: row.appointment_starts_at,
         dentistName: row.dentist_name,
+        ...(includeStaff ? { handledBy: row.checkout_staff_name } : {}),
         patient: {
           id: row.patient_id,
           displayName: row.patient_name,
@@ -124,6 +125,7 @@ const chargesFromRows = (rows, includeVoided = true) => {
         status: row.payment_status,
         receivedAt: row.received_at,
         voidReason: row.void_reason,
+        ...(includeStaff ? { recordedBy: row.payment_staff_name } : {}),
       })
     }
   }
@@ -294,7 +296,7 @@ export function createStore(db) {
     return result.rows.map(availabilitySlotFromRow)
   }
 
-  const loadCharges = async (queryable, whereSql, values, includeVoided = true) => {
+  const loadCharges = async (queryable, whereSql, values, includeVoided = true, includeStaff = true) => {
     const result = await queryable.query(
       `SELECT c.id AS charge_id, c.payment_record_number, c.appointment_id,
               c.description, c.subtotal_cents, c.discount_cents, c.total_cents,
@@ -302,19 +304,23 @@ export function createStore(db) {
               c.created_at AS charge_created_at,
               a.starts_at AS appointment_starts_at, d.display_name AS dentist_name,
               p.id AS patient_id, p.display_name AS patient_name, p.patient_number,
+              checkout_staff.display_name AS checkout_staff_name,
               pay.id AS payment_id, pay.amount_cents AS payment_amount_cents,
               pay.method AS payment_method, pay.external_reference,
-              pay.status AS payment_status, pay.received_at, pay.void_reason
+              pay.status AS payment_status, pay.received_at, pay.void_reason,
+              payment_staff.display_name AS payment_staff_name
        FROM patient_charges c
        JOIN appointments a ON a.id = c.appointment_id
        JOIN dentists d ON d.id = a.dentist_id
        JOIN patients p ON p.id = c.patient_id
+       JOIN staff_profiles checkout_staff ON checkout_staff.id = c.created_by_staff_id
        LEFT JOIN patient_payments pay ON pay.charge_id = c.id
+       LEFT JOIN staff_profiles payment_staff ON payment_staff.id = pay.recorded_by_staff_id
        WHERE ${whereSql}
        ORDER BY c.created_at DESC, pay.received_at ASC`,
       values,
     )
-    return chargesFromRows(result.rows, includeVoided)
+    return chargesFromRows(result.rows, includeVoided, includeStaff)
   }
 
   const updateChargeStatus = async (client, chargeId, now) => {
@@ -508,7 +514,7 @@ export function createStore(db) {
     getTreatmentPlan,
 
     async listPatientBilling(patientId) {
-      return loadCharges(db, 'c.patient_id = $1', [patientId], false)
+      return loadCharges(db, 'c.patient_id = $1', [patientId], false, false)
     },
 
     async getReceptionDashboard(date) {
