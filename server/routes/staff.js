@@ -483,7 +483,7 @@ export default async function staffRoutes(
             age: { type: 'integer', minimum: 0, maximum: 130 },
             gender: {
               type: 'string',
-              enum: ['female', 'male', 'non_binary', 'prefer_not_to_say'],
+              enum: ['female', 'male'],
             },
           },
         },

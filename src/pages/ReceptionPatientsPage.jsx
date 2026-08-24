@@ -162,8 +162,6 @@ export default function ReceptionPatientsPage() {
               <option value="">Choose</option>
               <option value="female">Female</option>
               <option value="male">Male</option>
-              <option value="non_binary">Non-binary</option>
-              <option value="prefer_not_to_say">Prefer not to say</option>
             </select>
           </div>
         </div>
