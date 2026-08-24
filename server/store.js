@@ -10,6 +10,7 @@ const appointmentFromRow = (row) => ({
 
 const recordFromRow = (row) => ({
   id: row.id,
+  appointmentId: row.appointment_id,
   procedureName: row.procedure_name,
   treatedOn: row.treated_on,
   patientSummary: row.patient_summary,
@@ -146,7 +147,7 @@ const appointmentSelect = `
 `
 
 const recordSelect = `
-  SELECT r.id, r.procedure_name, r.treated_on, r.patient_summary,
+  SELECT r.id, r.appointment_id, r.procedure_name, r.treated_on, r.patient_summary,
          d.display_name AS dentist_name
   FROM clinical_records r
   JOIN dentists d ON d.id = r.dentist_id

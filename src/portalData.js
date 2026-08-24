@@ -67,6 +67,7 @@ export function recordView(record = {}) {
   return {
     ...record,
     id: record.id,
+    appointmentId: record.appointmentId || record.appointment_id,
     procedureName: record.procedureName || record.procedure_name || 'Dental treatment',
     treatedOn: record.treatedOn || record.treated_on,
     summary: record.patientSummary || record.patient_summary || '',

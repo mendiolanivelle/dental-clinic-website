@@ -75,6 +75,7 @@ class MemoryStore {
         patientId: this.patient.id,
         published: true,
         id: '50000000-0000-4000-8000-000000000001',
+        appointmentId: '30000000-0000-4000-8000-000000000001',
         procedureName: 'Dental Cleaning',
         treatedOn: '2026-06-01',
         patientSummary: 'Published patient summary.',
@@ -1038,6 +1039,7 @@ test('patient endpoints require authentication and enforce patient ownership and
     records.json().records.map(({ id }) => id),
     ['50000000-0000-4000-8000-000000000001'],
   )
+  assert.equal(records.json().records[0].appointmentId, '30000000-0000-4000-8000-000000000001')
   assert.equal(records.headers['cache-control'], 'no-store')
 
   const billing = await app.inject({ url: '/api/me/billing', headers: { cookie } })
