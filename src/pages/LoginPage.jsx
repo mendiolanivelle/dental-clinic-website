@@ -122,7 +122,7 @@ export default function LoginPage({ onAuthenticated }) {
         </div>
       )}
 
-      <form className="space-y-5" onSubmit={handleSubmit}>
+      <form className="space-y-5 lg:space-y-4" onSubmit={handleSubmit}>
         <div>
           <label className="mb-2 block text-sm font-extrabold" htmlFor="fullName">
             Full name as recorded by the clinic
@@ -187,14 +187,14 @@ export default function LoginPage({ onAuthenticated }) {
         </button>
       </form>
 
-      <div className="mt-6 flex gap-3 rounded-2xl bg-mint/65 p-4">
+      <div className="mt-6 flex gap-3 rounded-2xl bg-mint/65 p-4 lg:mt-4">
         <LockKeyhole className="mt-0.5 shrink-0 text-brand" size={18} />
         <p className="text-xs leading-5 text-ink/60">
           Use the exact full name and patient ID recorded by the clinic.
         </p>
       </div>
 
-      <div className="mt-6 border-t border-ink/8 pt-5 text-center">
+      <div className="mt-6 border-t border-ink/8 pt-5 text-center lg:mt-4">
         <p className="text-xs text-ink/50">Don’t have your patient ID?</p>
         <ClinicPhoneLink className="mt-2 inline-flex items-center gap-1.5 text-sm font-extrabold text-brand hover:text-brand-dark">
           <Phone size={15} />

@@ -4,11 +4,23 @@ import ClinicPhoneLink, { clinicPhoneDisplay } from './ClinicPhoneLink'
 
 export default function AuthLayout({ children, servicesContent, title, description, onServicesClick, servicesActive }) {
   return (
-    <main className="grid min-h-screen bg-cream lg:grid-cols-[minmax(340px,.85fr)_1.15fr]">
-      <section className="relative hidden overflow-hidden bg-brand p-12 text-white lg:flex lg:flex-col">
+    <main className="grid min-h-screen bg-cream lg:h-screen lg:grid-cols-[minmax(340px,.85fr)_1.15fr] lg:overflow-hidden">
+      <section className="relative hidden overflow-hidden bg-brand p-8 text-white lg:flex lg:flex-col xl:p-12">
         <div className="absolute -right-28 -top-20 h-80 w-80 rounded-full border-[50px] border-white/8" />
         <div className="absolute -bottom-40 -left-28 h-96 w-96 rounded-full bg-white/5" />
         <BrandLogo light />
+        <button
+          className="services-cta relative mt-6 inline-flex w-fit items-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-extrabold text-brand shadow-lg shadow-black/10 transition hover:bg-mint"
+          type="button"
+          onClick={onServicesClick}
+          aria-controls="dental-services-panel"
+          aria-expanded={servicesActive}
+          aria-pressed={servicesActive}
+        >
+          <Sparkles size={17} />
+          {servicesActive ? 'Back to patient login' : 'View dental services'}
+          <ArrowRight size={16} />
+        </button>
         <div className="relative my-auto grid w-full max-w-xl">
           <div className={`col-start-1 row-start-1 self-center transition-all duration-500 ${servicesActive ? 'pointer-events-none -translate-x-5 opacity-0' : 'translate-x-0 opacity-100'}`}>
             <span className="mb-6 inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-xs font-bold">
@@ -30,25 +42,13 @@ export default function AuthLayout({ children, servicesContent, title, descripti
             {servicesContent}
           </div>
         </div>
-        <button
-          className="services-cta relative inline-flex w-fit items-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-extrabold text-brand shadow-lg shadow-black/10 transition hover:bg-mint"
-          type="button"
-          onClick={onServicesClick}
-          aria-controls="dental-services-panel"
-          aria-expanded={servicesActive}
-          aria-pressed={servicesActive}
-        >
-          <Sparkles size={17} />
-          {servicesActive ? 'Back to patient login' : 'View dental services'}
-          <ArrowRight size={16} />
-        </button>
         <ClinicPhoneLink className="relative inline-flex items-center gap-2 text-sm font-bold text-white/80 hover:text-white">
           <Phone size={17} />
           Need help? {clinicPhoneDisplay}
         </ClinicPhoneLink>
       </section>
 
-      <section className="flex min-h-screen items-center justify-center px-5 py-8 sm:px-8">
+      <section className="flex min-h-screen items-center justify-center px-5 py-8 sm:px-8 lg:min-h-0 lg:overflow-y-auto lg:px-10 lg:py-5 xl:px-12">
         <div className="w-full max-w-md">
           <div className="mb-10 lg:hidden">
             <BrandLogo />
@@ -67,7 +67,7 @@ export default function AuthLayout({ children, servicesContent, title, descripti
             <Sparkles size={15} />
             {servicesActive ? 'Back to patient login' : 'View dental services'}
           </button>
-          <div className="mt-8 rounded-[30px] bg-white p-6 soft-shadow sm:p-8">
+          <div className="mt-8 rounded-[30px] bg-white p-6 soft-shadow sm:p-8 lg:mt-6 lg:p-6">
             {servicesActive && (
               <div className="mb-8 border-b border-ink/8 pb-8 lg:hidden" id="mobile-dental-services-panel">
                 {servicesContent}
@@ -75,7 +75,7 @@ export default function AuthLayout({ children, servicesContent, title, descripti
             )}
             {children}
           </div>
-          <p className="mt-6 text-center text-xs leading-5 text-ink/45">
+          <p className="mt-6 text-center text-xs leading-5 text-ink/45 lg:mt-4">
             This portal is for clinic-provisioned patients. Your information is never stored in this browser.
           </p>
         </div>
