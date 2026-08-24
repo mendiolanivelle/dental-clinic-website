@@ -446,4 +446,69 @@ export default async function staffRoutes(
       })
     },
   )
+
+  app.patch(
+    '/api/staff/patients/:id',
+    {
+      preHandler: requireReception,
+      schema: {
+        params: idParams,
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          required: [
+            'displayName',
+            'age',
+            'gender',
+            'weightKg',
+            'bloodPressureSystolic',
+            'bloodPressureDiastolic',
+          ],
+          properties: {
+            displayName: { type: 'string', minLength: 2, maxLength: 160 },
+            phone: { type: 'string', maxLength: 32, pattern: '^[+0-9 ()-]*$' },
+            age: { type: 'integer', minimum: 0, maximum: 130 },
+            gender: {
+              type: 'string',
+              enum: ['female', 'male', 'non_binary', 'prefer_not_to_say'],
+            },
+            weightKg: { anyOf: [{ type: 'number', minimum: 1, maximum: 500 }, { type: 'null' }] },
+            bloodPressureSystolic: { anyOf: [{ type: 'integer', minimum: 50, maximum: 300 }, { type: 'null' }] },
+            bloodPressureDiastolic: { anyOf: [{ type: 'integer', minimum: 30, maximum: 200 }, { type: 'null' }] },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const displayName = request.body.displayName.trim().replace(/\s+/gu, ' ')
+      const normalizedName = normalizeName(displayName)
+      const systolic = request.body.bloodPressureSystolic
+      const diastolic = request.body.bloodPressureDiastolic
+      if (!normalizedName || (systolic === null) !== (diastolic === null) || (systolic !== null && systolic <= diastolic)) {
+        return reply.code(400).send({
+          error: { code: 'INVALID_REQUEST', message: 'Check the patient name and blood pressure values.' },
+        })
+      }
+      const result = await store.updateReceptionPatient({
+        id: request.params.id,
+        displayName,
+        normalizedName,
+        phoneE164: request.body.phone?.trim() || null,
+        age: request.body.age,
+        gender: request.body.gender,
+        weightKg: request.body.weightKg,
+        bloodPressureSystolic: systolic,
+        bloodPressureDiastolic: diastolic,
+        now: now(),
+      })
+      if (result.outcome === 'not_found') {
+        return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'That patient was not found.' } })
+      }
+      if (result.outcome === 'already_exists') {
+        return reply.code(409).send({ error: { code: 'PATIENT_EXISTS', message: 'A patient with that name already exists.' } })
+      }
+      await audit(request, 'staff.patient_profile_updated', 'patient', result.patient.id)
+      return { patient: result.patient }
+    },
+  )
 }

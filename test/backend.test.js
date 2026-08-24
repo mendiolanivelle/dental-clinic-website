@@ -387,11 +387,28 @@ class MemoryStore {
           id: this.patient.id,
           displayName: this.patient.displayName,
           patientNumber: this.patient.patientNumber,
-          phone: '+639000000001',
-          age: 28,
-          gender: 'female',
+          phone: this.patient.phone || '+639000000001',
+          age: this.patient.age ?? 28,
+          gender: this.patient.gender || 'female',
+          weightKg: this.patient.weightKg ?? null,
+          bloodPressureSystolic: this.patient.bloodPressureSystolic ?? null,
+          bloodPressureDiastolic: this.patient.bloodPressureDiastolic ?? null,
         }]
       : []
+  }
+
+  async updateReceptionPatient(input) {
+    if (input.id !== this.patient.id) return { outcome: 'not_found' }
+    Object.assign(this.patient, {
+      displayName: input.displayName,
+      phone: input.phoneE164,
+      age: input.age,
+      gender: input.gender,
+      weightKg: input.weightKg,
+      bloodPressureSystolic: input.bloodPressureSystolic,
+      bloodPressureDiastolic: input.bloodPressureDiastolic,
+    })
+    return { outcome: 'updated', patient: (await this.searchReceptionPatients(''))[0] }
   }
 
   async createReceptionPatient(input) {
@@ -789,6 +806,25 @@ test('reception staff use a separate protected session and can confirm booking r
     })
     assert.equal(patients.statusCode, 200)
     assert.equal(patients.json().patients[0].patientNumber, 'PT-DEMO01')
+
+    const updatedPatient = await staffApp.inject({
+      method: 'PATCH',
+      url: `/api/staff/patients/${staffStore.patient.id}`,
+      headers: { origin: config.publicOrigin, cookie },
+      payload: {
+        displayName: staffStore.patient.displayName,
+        phone: '+639111111111',
+        age: 29,
+        gender: 'female',
+        weightKg: 58.5,
+        bloodPressureSystolic: 120,
+        bloodPressureDiastolic: 80,
+      },
+    })
+    assert.equal(updatedPatient.statusCode, 200)
+    assert.equal(updatedPatient.json().patient.weightKg, 58.5)
+    assert.equal(updatedPatient.json().patient.bloodPressureSystolic, 120)
+    assert.equal(updatedPatient.json().patient.bloodPressureDiastolic, 80)
 
     const missingPatients = await staffApp.inject({
       url: '/api/staff/patients?q=New Patient',

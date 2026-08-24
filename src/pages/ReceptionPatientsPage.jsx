@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Check, Copy, IdCard, Phone, Search, UserPlus, UsersRound } from 'lucide-react'
+import { Check, Copy, IdCard, Pencil, Phone, Search, UserPlus, UsersRound } from 'lucide-react'
 import { api } from '../api'
 import { EmptyState } from '../components/PageState'
 import { titleCase } from '../format'
@@ -18,6 +18,10 @@ export default function ReceptionPatientsPage() {
   const [creating, setCreating] = useState(false)
   const [createdPatient, setCreatedPatient] = useState(null)
   const [copied, setCopied] = useState(false)
+  const [editingPatient, setEditingPatient] = useState(null)
+  const [editForm, setEditForm] = useState(null)
+  const [saving, setSaving] = useState(false)
+  const [savedMessage, setSavedMessage] = useState('')
 
   const loadPatients = useCallback(async (searchQuery = '') => {
     setLoading(true)
@@ -73,6 +77,48 @@ export default function ReceptionPatientsPage() {
     window.setTimeout(() => setCopied(false), 1800)
   }
 
+  function startEditing(patient) {
+    setEditingPatient(patient)
+    setEditForm({
+      displayName: patient.displayName,
+      phone: patient.phone || '',
+      age: String(patient.age ?? ''),
+      gender: patient.gender || '',
+      weightKg: String(patient.weightKg ?? ''),
+      bloodPressureSystolic: String(patient.bloodPressureSystolic ?? ''),
+      bloodPressureDiastolic: String(patient.bloodPressureDiastolic ?? ''),
+    })
+    setError('')
+    setSavedMessage('')
+  }
+
+  async function savePatient(event) {
+    event.preventDefault()
+    const optionalNumber = (value) => value === '' ? null : Number(value)
+    setSaving(true)
+    setError('')
+    try {
+      const data = await api.updateReceptionPatient(editingPatient.id, {
+        displayName: editForm.displayName.trim(),
+        phone: editForm.phone.trim(),
+        age: Number(editForm.age),
+        gender: editForm.gender,
+        weightKg: optionalNumber(editForm.weightKg),
+        bloodPressureSystolic: optionalNumber(editForm.bloodPressureSystolic),
+        bloodPressureDiastolic: optionalNumber(editForm.bloodPressureDiastolic),
+      })
+      setPatients((current) => current.map((patient) => patient.id === data.patient.id ? data.patient : patient)
+        .sort((a, b) => a.displayName.localeCompare(b.displayName)))
+      setEditingPatient(null)
+      setEditForm(null)
+      setSavedMessage(`${data.patient.displayName}’s information was updated.`)
+    } catch (requestError) {
+      setError(requestError.message || 'The patient information could not be updated.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return <>
     <div className="mb-8">
       <p className="text-xs font-extrabold uppercase tracking-[.18em] text-brand/60">Directory</p>
@@ -87,6 +133,7 @@ export default function ReceptionPatientsPage() {
       <button className="rounded-2xl bg-brand px-6 py-3 text-sm font-extrabold text-white hover:bg-brand-dark disabled:opacity-60" disabled={loading} type="submit">{loading ? 'Searching…' : 'Search'}</button>
     </form>
     {error && <p className="mt-4 rounded-2xl bg-[#fff0e7] p-4 text-sm text-[#914b22]" role="alert">{error}</p>}
+    {savedMessage && <p className="mt-4 rounded-2xl bg-mint p-4 text-sm font-bold text-brand" role="status">{savedMessage}</p>}
     {showCreate && (
       <form className="mt-6 rounded-3xl border border-brand/15 bg-mint/55 p-5 sm:p-6" onSubmit={createPatient}>
         <div className="flex items-start gap-3">
@@ -140,6 +187,25 @@ export default function ReceptionPatientsPage() {
         </button>
       </div>
     )}
+    {editingPatient && editForm && (
+      <form className="mt-6 rounded-3xl border border-brand/15 bg-white p-5 soft-shadow sm:p-6" onSubmit={savePatient}>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div><p className="text-xs font-extrabold uppercase tracking-[.16em] text-brand/60">Edit patient · {editingPatient.patientNumber}</p><h2 className="mt-1 text-lg font-extrabold">Patient information</h2></div>
+          <button className="rounded-xl px-3 py-2 text-xs font-extrabold text-ink/50 hover:bg-cream" type="button" onClick={() => { setEditingPatient(null); setEditForm(null) }}>Cancel</button>
+        </div>
+        <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <label className="text-sm font-extrabold">Full name<input className="input-field mt-2" required value={editForm.displayName} onChange={(event) => setEditForm({ ...editForm, displayName: event.target.value })} /></label>
+          <label className="text-sm font-extrabold">Phone <span className="font-normal text-ink/40">(optional)</span><input className="input-field mt-2" type="tel" value={editForm.phone} onChange={(event) => setEditForm({ ...editForm, phone: event.target.value })} /></label>
+          <label className="text-sm font-extrabold">Age<input className="input-field mt-2" type="number" min="0" max="130" required value={editForm.age} onChange={(event) => setEditForm({ ...editForm, age: event.target.value })} /></label>
+          <label className="text-sm font-extrabold">Gender<select className="input-field mt-2" required value={editForm.gender} onChange={(event) => setEditForm({ ...editForm, gender: event.target.value })}><option value="">Choose</option><option value="female">Female</option><option value="male">Male</option><option value="non_binary">Non-binary</option><option value="prefer_not_to_say">Prefer not to say</option></select></label>
+          <label className="text-sm font-extrabold">Weight (kg) <span className="font-normal text-ink/40">(optional)</span><input className="input-field mt-2" type="number" min="1" max="500" step="0.1" value={editForm.weightKg} onChange={(event) => setEditForm({ ...editForm, weightKg: event.target.value })} /></label>
+          <label className="text-sm font-extrabold">Blood pressure systolic <span className="font-normal text-ink/40">(optional)</span><input className="input-field mt-2" type="number" min="50" max="300" placeholder="120" value={editForm.bloodPressureSystolic} onChange={(event) => setEditForm({ ...editForm, bloodPressureSystolic: event.target.value })} /></label>
+          <label className="text-sm font-extrabold">Blood pressure diastolic <span className="font-normal text-ink/40">(optional)</span><input className="input-field mt-2" type="number" min="30" max="200" placeholder="80" value={editForm.bloodPressureDiastolic} onChange={(event) => setEditForm({ ...editForm, bloodPressureDiastolic: event.target.value })} /></label>
+        </div>
+        <p className="mt-3 text-xs text-ink/40">Enter both blood pressure values together, for example 120/80 mmHg.</p>
+        <button className="mt-5 rounded-xl bg-brand px-5 py-3 text-sm font-extrabold text-white hover:bg-brand-dark disabled:opacity-60" disabled={saving} type="submit">{saving ? 'Saving…' : 'Save patient information'}</button>
+      </form>
+    )}
     <div className="mt-6">
       {!loading && patients.length > 0 && <p className="mb-3 text-xs font-extrabold uppercase tracking-[.14em] text-ink/40">{patients.length} patient{patients.length === 1 ? '' : 's'}</p>}
       {loading ? <p className="rounded-3xl bg-white p-8 text-center text-sm font-semibold text-ink/45">Loading patients…</p> :
@@ -151,12 +217,14 @@ export default function ReceptionPatientsPage() {
       /> : (
         <div className="grid gap-4 md:grid-cols-2">
           {patients.map((patient) => (
-            <article className="rounded-3xl bg-white p-5 soft-shadow" key={patient.id}>
-              <h2 className="text-lg font-extrabold">{patient.displayName}</h2>
+            <button className="group rounded-3xl bg-white p-5 text-left soft-shadow transition hover:-translate-y-0.5 hover:ring-2 hover:ring-brand/15" key={patient.id} type="button" onClick={() => startEditing(patient)}>
+              <div className="flex items-start justify-between gap-3"><h2 className="text-lg font-extrabold group-hover:text-brand">{patient.displayName}</h2><Pencil className="text-brand/45 group-hover:text-brand" size={17} /></div>
               <p className="mt-3 flex items-center gap-2 text-sm text-ink/55"><IdCard className="text-brand" size={16} />{patient.patientNumber}</p>
-              <p className="mt-2 flex items-center gap-2 text-sm text-ink/55"><Phone className="text-brand" size={16} />{patient.phone}</p>
+              <p className="mt-2 flex items-center gap-2 text-sm text-ink/55"><Phone className="text-brand" size={16} />{patient.phone || 'No phone recorded'}</p>
               {patient.age !== null && <p className="mt-2 text-sm text-ink/55">Age {patient.age} · {titleCase(patient.gender)}</p>}
-            </article>
+              <p className="mt-2 text-sm text-ink/55">Weight {patient.weightKg === null || patient.weightKg === undefined ? 'Not recorded' : `${patient.weightKg} kg`} · BP {patient.bloodPressureSystolic && patient.bloodPressureDiastolic ? `${patient.bloodPressureSystolic}/${patient.bloodPressureDiastolic} mmHg` : 'Not recorded'}</p>
+              <p className="mt-3 text-xs font-extrabold text-brand/55">Click to edit information</p>
+            </button>
           ))}
         </div>
       )}

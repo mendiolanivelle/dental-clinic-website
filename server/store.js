@@ -817,7 +817,8 @@ export function createStore(db) {
 
     async searchReceptionPatients(query) {
       const result = await db.query(
-        `SELECT id, display_name, patient_number, phone_e164, age, gender
+        `SELECT id, display_name, patient_number, phone_e164, age, gender,
+                weight_kg, blood_pressure_systolic, blood_pressure_diastolic
          FROM patients
          WHERE (
              position(lower($1) in lower(display_name)) > 0
@@ -833,7 +834,67 @@ export function createStore(db) {
         phone: row.phone_e164,
         age: row.age,
         gender: row.gender,
+        weightKg: row.weight_kg === null ? null : Number(row.weight_kg),
+        bloodPressureSystolic: row.blood_pressure_systolic,
+        bloodPressureDiastolic: row.blood_pressure_diastolic,
       }))
+    },
+
+    async updateReceptionPatient({
+      id,
+      displayName,
+      normalizedName,
+      phoneE164,
+      age,
+      gender,
+      weightKg,
+      bloodPressureSystolic,
+      bloodPressureDiastolic,
+      now,
+    }) {
+      try {
+        const result = await db.query(
+          `UPDATE patients
+           SET display_name = $2, normalized_name = $3, phone_e164 = $4,
+               age = $5, gender = $6, weight_kg = $7,
+               blood_pressure_systolic = $8, blood_pressure_diastolic = $9,
+               updated_at = $10
+           WHERE id = $1
+           RETURNING id, display_name, patient_number, phone_e164, age, gender,
+                     weight_kg, blood_pressure_systolic, blood_pressure_diastolic`,
+          [
+            id,
+            displayName,
+            normalizedName,
+            phoneE164,
+            age,
+            gender,
+            weightKg,
+            bloodPressureSystolic,
+            bloodPressureDiastolic,
+            now,
+          ],
+        )
+        if (!result.rowCount) return { outcome: 'not_found' }
+        const row = result.rows[0]
+        return {
+          outcome: 'updated',
+          patient: {
+            id: row.id,
+            displayName: row.display_name,
+            patientNumber: row.patient_number,
+            phone: row.phone_e164,
+            age: row.age,
+            gender: row.gender,
+            weightKg: row.weight_kg === null ? null : Number(row.weight_kg),
+            bloodPressureSystolic: row.blood_pressure_systolic,
+            bloodPressureDiastolic: row.blood_pressure_diastolic,
+          },
+        }
+      } catch (error) {
+        if (error.code === '23505') return { outcome: 'already_exists' }
+        throw error
+      }
     },
 
     async createReceptionPatient({

@@ -112,4 +112,8 @@ export const api = {
     method: 'POST',
     body: json(details),
   }),
+  updateReceptionPatient: (id, details) => request(`/api/staff/patients/${id}`, {
+    method: 'PATCH',
+    body: json(details),
+  }),
 }
