@@ -69,6 +69,14 @@ test('the backend role stays least-privilege and the forward migration removes O
     new URL('../migrations/007_reception_patient_accounts.sql', import.meta.url),
     'utf8',
   )
+  const demographicsSql = await readFile(
+    new URL('../migrations/008_patient_demographics.sql', import.meta.url),
+    'utf8',
+  )
+  const paymentsSql = await readFile(
+    new URL('../migrations/009_patient_payments.sql', import.meta.url),
+    'utf8',
+  )
   const compact = securitySql.replace(/\s+/g, ' ')
 
   assert.doesNotMatch(securitySql, /\bDELETE\b/)
@@ -114,6 +122,15 @@ test('the backend role stays least-privilege and the forward migration removes O
   assert.match(storeSql, /WHERE \$4::timestamptz > \$7::timestamptz/)
   assert.match(patientAccountSql, /ALTER COLUMN phone_e164 DROP NOT NULL/i)
   assert.match(patientAccountSql, /GRANT INSERT ON dental_portal\.patients TO dental_portal_backend/i)
+  assert.match(demographicsSql, /ADD COLUMN IF NOT EXISTS age integer/i)
+  assert.match(demographicsSql, /gender IN \('female', 'male', 'non_binary', 'prefer_not_to_say'\)/i)
+  assert.match(paymentsSql, /CREATE TABLE IF NOT EXISTS patient_charges/i)
+  assert.match(paymentsSql, /CREATE TABLE IF NOT EXISTS patient_payments/i)
+  assert.match(paymentsSql, /amount_cents integer NOT NULL CHECK \(amount_cents > 0\)/i)
+  assert.match(paymentsSql, /status IN \('posted', 'voided'\)/i)
+  assert.match(paymentsSql, /GRANT SELECT, INSERT, UPDATE[\s\S]*patient_charges[\s\S]*patient_payments/i)
+  assert.doesNotMatch(paymentsSql, /\bDELETE\b/i)
+  assert.doesNotMatch(paymentsSql, /card_number|cvv|expiry/i)
 })
 
 test('production permits Supabase direct/session connections and rejects other hosts or transaction pooling', () => {

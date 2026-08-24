@@ -39,6 +39,13 @@ export function formatDateTime(value) {
   return `${formatDate(value, { weekday: 'long' })} at ${formatTime(value)}`
 }
 
+export function formatCurrency(cents = 0) {
+  return new Intl.NumberFormat('en-PH', {
+    style: 'currency',
+    currency: 'PHP',
+  }).format(cents / 100)
+}
+
 export function formatInterval(days) {
   if (!days || days < 1) return 'As advised by your dentist'
   if (days % 365 === 0) return `Every ${days / 365} year${days === 365 ? '' : 's'}`

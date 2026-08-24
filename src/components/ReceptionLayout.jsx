@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
   CalendarDays,
+  CreditCard,
   ClipboardList,
   LayoutDashboard,
   LogOut,
@@ -16,6 +17,7 @@ const navigation = [
   { label: 'Overview', to: '/reception', icon: LayoutDashboard, end: true },
   { label: 'Booking requests', to: '/reception/requests', icon: ClipboardList },
   { label: 'Calendar', to: '/reception/calendar', icon: CalendarDays },
+  { label: 'Billing & payments', to: '/reception/billing', icon: CreditCard },
   { label: 'Patients', to: '/reception/patients', icon: UsersRound },
 ]
 

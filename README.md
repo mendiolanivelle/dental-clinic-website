@@ -8,7 +8,9 @@ is no patient registration, password, SMS, or one-time-code step.
 
 Clinic reception staff use the same login page with a separate **Clinic staff**
 tab. Supabase Auth verifies clinic-provisioned staff accounts, while the backend
-keeps staff sessions and permissions separate from patient access.
+keeps staff sessions and permissions separate from patient access. Reception can
+also complete appointment checkout, record cash or external electronic payments,
+track balances, and reference the clinic's BIR-authorized invoice.
 
 > Direct login is intentionally simple. In production, patient IDs must be
 > long, random, non-sequential, kept private, and replaced if disclosed. A
@@ -68,10 +70,25 @@ values
 Do not share reception accounts. Disable `active` when an employee leaves.
 
 From the reception portal, search the patient’s name first. If no match exists,
-choose **Create patient account**, enter the full name and optional phone number,
+choose **Create patient account**, enter the full name, age, gender, and optional phone number,
 and give the patient the next five-digit portal ID, such as `00001`. Because the
 ID is also the patient login credential, keep it private and rely on the portal
 rate limits and audit trail to reduce guessing attempts.
+
+## Reception billing
+
+Confirmed appointments appear under **Billing & payments**. Reception records the
+final service charge, optional discount, amount received, payment method, external
+transaction reference, and optional BIR invoice number. Completing checkout marks
+the appointment completed. Unpaid and partially paid records remain open for later
+payments; posted payments can be voided with a required reason and are never deleted.
+
+The portal stores amounts as integer centavos and never stores card numbers, CVVs,
+PINs, or wallet credentials. Cash, QR Ph, card-terminal, and bank payments are
+collected outside the portal and then recorded by reception. `PAY-######` is an
+internal payment-record number, not an official tax invoice. Continue issuing the
+clinic's BIR-authorized invoice unless the software is separately registered for
+invoice generation.
 
 ## Authentication and privacy
 

@@ -178,6 +178,12 @@ export default async function patientRoutes(app, { store, config, now }) {
     return { records }
   })
 
+  app.get('/api/me/billing', { preHandler: app.authenticate }, async (request) => {
+    const charges = await store.listPatientBilling(request.patient.id)
+    await audited(request, 'portal.billing_listed')
+    return { charges }
+  })
+
   app.get(
     '/api/me/records/:id',
     { preHandler: app.authenticate, schema: { params: idParams } },

@@ -72,6 +72,7 @@ export const api = {
   }),
   getAppointments: (scope) => request(`/api/me/appointments?scope=${encodeURIComponent(scope)}`),
   getRecords: () => request('/api/me/records'),
+  getBilling: () => request('/api/me/billing'),
   getTreatmentPlan: () => request('/api/me/treatment-plan'),
   staffLogin: (details) => request('/api/staff/auth/login', {
     method: 'POST',
@@ -92,6 +93,19 @@ export const api = {
   }),
   getReceptionCalendar: (date) =>
     request(`/api/staff/calendar?date=${encodeURIComponent(date)}`),
+  getReceptionBilling: () => request('/api/staff/billing'),
+  checkoutAppointment: (id, details) => request(`/api/staff/appointments/${id}/checkout`, {
+    method: 'POST',
+    body: json(details),
+  }),
+  addPatientPayment: (id, details) => request(`/api/staff/charges/${id}/payments`, {
+    method: 'POST',
+    body: json(details),
+  }),
+  voidPatientPayment: (id, reason) => request(`/api/staff/payments/${id}/void`, {
+    method: 'POST',
+    body: json({ reason }),
+  }),
   searchReceptionPatients: (query) =>
     request(`/api/staff/patients?q=${encodeURIComponent(query)}`),
   createReceptionPatient: (details) => request('/api/staff/patients', {

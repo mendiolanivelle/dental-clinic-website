@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Check, Copy, IdCard, Phone, Search, UserPlus, UsersRound } from 'lucide-react'
 import { api } from '../api'
 import { EmptyState } from '../components/PageState'
+import { titleCase } from '../format'
 
 export default function ReceptionPatientsPage() {
   const [query, setQuery] = useState('')
@@ -12,6 +13,8 @@ export default function ReceptionPatientsPage() {
   const [showCreate, setShowCreate] = useState(false)
   const [createName, setCreateName] = useState('')
   const [createPhone, setCreatePhone] = useState('')
+  const [createAge, setCreateAge] = useState('')
+  const [createGender, setCreateGender] = useState('')
   const [creating, setCreating] = useState(false)
   const [createdPatient, setCreatedPatient] = useState(null)
   const [copied, setCopied] = useState(false)
@@ -45,6 +48,8 @@ export default function ReceptionPatientsPage() {
       const data = await api.createReceptionPatient({
         displayName: createName.trim(),
         phone: createPhone.trim(),
+        age: Number(createAge),
+        gender: createGender,
       })
       setCreatedPatient(data.patient)
       setPatients([data.patient])
@@ -88,7 +93,7 @@ export default function ReceptionPatientsPage() {
             <p className="mt-1 text-sm leading-6 text-ink/55">A five-digit patient ID will be assigned automatically after you save this patient.</p>
           </div>
         </div>
-        <div className="mt-5 grid gap-4 sm:grid-cols-2">
+        <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <div>
             <label className="mb-2 block text-sm font-extrabold" htmlFor="new-patient-name">Full name</label>
             <input id="new-patient-name" className="input-field" value={createName} onChange={(event) => setCreateName(event.target.value)} placeholder="First Middle Last" required />
@@ -96,6 +101,20 @@ export default function ReceptionPatientsPage() {
           <div>
             <label className="mb-2 block text-sm font-extrabold" htmlFor="new-patient-phone">Phone <span className="font-normal text-ink/40">(optional)</span></label>
             <input id="new-patient-phone" className="input-field" type="tel" value={createPhone} onChange={(event) => setCreatePhone(event.target.value)} placeholder="+63 9XX XXX XXXX" />
+          </div>
+          <div>
+            <label className="mb-2 block text-sm font-extrabold" htmlFor="new-patient-age">Age</label>
+            <input id="new-patient-age" className="input-field" type="number" min="0" max="130" value={createAge} onChange={(event) => setCreateAge(event.target.value)} required />
+          </div>
+          <div>
+            <label className="mb-2 block text-sm font-extrabold" htmlFor="new-patient-gender">Gender</label>
+            <select id="new-patient-gender" className="input-field" value={createGender} onChange={(event) => setCreateGender(event.target.value)} required>
+              <option value="">Choose</option>
+              <option value="female">Female</option>
+              <option value="male">Male</option>
+              <option value="non_binary">Non-binary</option>
+              <option value="prefer_not_to_say">Prefer not to say</option>
+            </select>
           </div>
         </div>
         <div className="mt-5 flex flex-wrap gap-2">
@@ -110,6 +129,7 @@ export default function ReceptionPatientsPage() {
           <p className="text-xs font-extrabold uppercase tracking-[.16em] text-brand/60">Patient account created</p>
           <h2 className="mt-1 text-lg font-extrabold">Give this ID to {createdPatient.displayName.split(' ')[0]}</h2>
           <p className="mt-1 text-sm text-ink/50">They will use it with their full name to open the patient portal.</p>
+          <p className="mt-2 text-xs font-bold text-ink/40">Age {createdPatient.age} · {titleCase(createdPatient.gender)}</p>
         </div>
         <button className="inline-flex items-center justify-center gap-2 rounded-2xl bg-brand px-4 py-3 text-sm font-extrabold text-white hover:bg-brand-dark" type="button" onClick={copyPatientId}>
           {copied ? <Check size={16} /> : <Copy size={16} />}
@@ -130,6 +150,7 @@ export default function ReceptionPatientsPage() {
               <h2 className="text-lg font-extrabold">{patient.displayName}</h2>
               <p className="mt-3 flex items-center gap-2 text-sm text-ink/55"><IdCard className="text-brand" size={16} />{patient.patientNumber}</p>
               <p className="mt-2 flex items-center gap-2 text-sm text-ink/55"><Phone className="text-brand" size={16} />{patient.phone}</p>
+              {patient.age !== null && <p className="mt-2 text-sm text-ink/55">Age {patient.age} · {titleCase(patient.gender)}</p>}
             </article>
           ))}
         </div>

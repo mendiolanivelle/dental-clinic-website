@@ -90,6 +90,51 @@ const receptionAppointmentFromRow = (row) => ({
   },
 })
 
+const chargesFromRows = (rows, includeVoided = true) => {
+  const charges = new Map()
+  for (const row of rows) {
+    if (!charges.has(row.charge_id)) {
+      charges.set(row.charge_id, {
+        id: row.charge_id,
+        recordNumber: String(row.payment_record_number),
+        appointmentId: row.appointment_id,
+        description: row.description,
+        subtotalCents: row.subtotal_cents,
+        discountCents: row.discount_cents,
+        totalCents: row.total_cents,
+        status: row.charge_status,
+        invoiceReference: row.invoice_reference,
+        createdAt: row.charge_created_at,
+        appointmentStartsAt: row.appointment_starts_at,
+        dentistName: row.dentist_name,
+        patient: {
+          id: row.patient_id,
+          displayName: row.patient_name,
+          patientNumber: row.patient_number,
+        },
+        payments: [],
+      })
+    }
+    if (row.payment_id && (includeVoided || row.payment_status === 'posted')) {
+      charges.get(row.charge_id).payments.push({
+        id: row.payment_id,
+        amountCents: row.payment_amount_cents,
+        method: row.payment_method,
+        reference: row.external_reference,
+        status: row.payment_status,
+        receivedAt: row.received_at,
+        voidReason: row.void_reason,
+      })
+    }
+  }
+  return [...charges.values()].map((charge) => {
+    const paidCents = charge.payments
+      .filter(({ status }) => status === 'posted')
+      .reduce((total, { amountCents }) => total + amountCents, 0)
+    return { ...charge, paidCents, balanceCents: charge.totalCents - paidCents }
+  })
+}
+
 const appointmentSelect = `
   SELECT a.id, t.name AS type_name, a.starts_at, a.ends_at, a.status,
          d.display_name AS dentist_name, a.patient_instructions
@@ -247,6 +292,48 @@ export function createStore(db) {
       [date, now],
     )
     return result.rows.map(availabilitySlotFromRow)
+  }
+
+  const loadCharges = async (queryable, whereSql, values, includeVoided = true) => {
+    const result = await queryable.query(
+      `SELECT c.id AS charge_id, c.payment_record_number, c.appointment_id,
+              c.description, c.subtotal_cents, c.discount_cents, c.total_cents,
+              c.status AS charge_status, c.invoice_reference,
+              c.created_at AS charge_created_at,
+              a.starts_at AS appointment_starts_at, d.display_name AS dentist_name,
+              p.id AS patient_id, p.display_name AS patient_name, p.patient_number,
+              pay.id AS payment_id, pay.amount_cents AS payment_amount_cents,
+              pay.method AS payment_method, pay.external_reference,
+              pay.status AS payment_status, pay.received_at, pay.void_reason
+       FROM patient_charges c
+       JOIN appointments a ON a.id = c.appointment_id
+       JOIN dentists d ON d.id = a.dentist_id
+       JOIN patients p ON p.id = c.patient_id
+       LEFT JOIN patient_payments pay ON pay.charge_id = c.id
+       WHERE ${whereSql}
+       ORDER BY c.created_at DESC, pay.received_at ASC`,
+      values,
+    )
+    return chargesFromRows(result.rows, includeVoided)
+  }
+
+  const updateChargeStatus = async (client, chargeId, now) => {
+    await client.query(
+      `UPDATE patient_charges c
+       SET status = CASE
+             WHEN paid.total >= c.total_cents THEN 'paid'
+             WHEN paid.total > 0 THEN 'partially_paid'
+             ELSE 'unpaid'
+           END,
+           updated_at = $2
+       FROM (
+         SELECT coalesce(sum(amount_cents) FILTER (WHERE status = 'posted'), 0)::integer AS total
+         FROM patient_payments
+         WHERE charge_id = $1
+       ) paid
+       WHERE c.id = $1`,
+      [chargeId, now],
+    )
   }
 
   return {
@@ -420,6 +507,10 @@ export function createStore(db) {
     listRecords,
     getTreatmentPlan,
 
+    async listPatientBilling(patientId) {
+      return loadCharges(db, 'c.patient_id = $1', [patientId], false)
+    },
+
     async getReceptionDashboard(date) {
       const [pending, calendar] = await Promise.all([
         db.query(
@@ -494,6 +585,173 @@ export function createStore(db) {
       }
     },
 
+    async listReceptionBilling(date) {
+      const [appointments, charges, totals] = await Promise.all([
+        db.query(
+          `SELECT a.id, t.name AS type_name, a.starts_at, a.ends_at, a.status,
+                  d.display_name AS dentist_name, p.id AS patient_id,
+                  p.display_name AS patient_name, p.patient_number, p.phone_e164
+           FROM appointments a
+           JOIN appointment_types t ON t.id = a.appointment_type_id
+           JOIN dentists d ON d.id = a.dentist_id
+           JOIN patients p ON p.id = a.patient_id
+           LEFT JOIN patient_charges c ON c.appointment_id = a.id
+           WHERE a.status IN ('scheduled', 'confirmed')
+             AND c.id IS NULL
+           ORDER BY a.starts_at ASC
+           LIMIT 100`,
+        ),
+        loadCharges(db, 'true', [], true),
+        db.query(
+          `SELECT method, coalesce(sum(amount_cents), 0)::integer AS total_cents
+           FROM patient_payments
+           WHERE status = 'posted'
+             AND (received_at AT TIME ZONE 'Asia/Manila')::date = $1::date
+           GROUP BY method
+           ORDER BY method`,
+          [date],
+        ),
+      ])
+      return {
+        awaitingCheckout: appointments.rows.map(receptionAppointmentFromRow),
+        charges,
+        todayPayments: totals.rows.map((row) => ({
+          method: row.method,
+          totalCents: row.total_cents,
+        })),
+      }
+    },
+
+    async createPatientCheckout({
+      appointmentId,
+      staffId,
+      description,
+      subtotalCents,
+      discountCents,
+      paymentAmountCents,
+      paymentMethod,
+      paymentReference,
+      invoiceReference,
+      now,
+    }) {
+      return db.transaction(async (client) => {
+        const selected = await client.query(
+          `SELECT id, patient_id
+           FROM appointments
+           WHERE id = $1 AND status IN ('scheduled', 'confirmed')
+           FOR UPDATE`,
+          [appointmentId],
+        )
+        if (!selected.rowCount) return { outcome: 'not_found' }
+        const totalCents = subtotalCents - discountCents
+        if (totalCents <= 0 || paymentAmountCents > totalCents) {
+          return { outcome: 'invalid_amount' }
+        }
+
+        let inserted
+        try {
+          inserted = await client.query(
+            `INSERT INTO patient_charges (
+               appointment_id, patient_id, description, subtotal_cents,
+               discount_cents, total_cents, invoice_reference,
+               created_by_staff_id, created_at, updated_at
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)
+             RETURNING id`,
+            [
+              appointmentId,
+              selected.rows[0].patient_id,
+              description,
+              subtotalCents,
+              discountCents,
+              totalCents,
+              invoiceReference,
+              staffId,
+              now,
+            ],
+          )
+        } catch (error) {
+          if (error.code === '23505') return { outcome: 'already_checked_out' }
+          throw error
+        }
+        const chargeId = inserted.rows[0].id
+        if (paymentAmountCents > 0) {
+          await client.query(
+            `INSERT INTO patient_payments (
+               charge_id, amount_cents, method, external_reference,
+               recorded_by_staff_id, received_at
+             ) VALUES ($1, $2, $3, $4, $5, $6)`,
+            [chargeId, paymentAmountCents, paymentMethod, paymentReference, staffId, now],
+          )
+        }
+        await updateChargeStatus(client, chargeId, now)
+        await client.query(
+          `UPDATE appointments SET status = 'completed', updated_at = $2 WHERE id = $1`,
+          [appointmentId, now],
+        )
+        const [charge] = await loadCharges(client, 'c.id = $1', [chargeId], true)
+        return { outcome: 'created', charge }
+      })
+    },
+
+    async addPatientPayment({ chargeId, staffId, amountCents, method, reference, now }) {
+      return db.transaction(async (client) => {
+        const selected = await client.query(
+          `SELECT id, total_cents
+           FROM patient_charges
+           WHERE id = $1
+           FOR UPDATE`,
+          [chargeId],
+        )
+        if (!selected.rowCount) return { outcome: 'not_found' }
+        const charge = selected.rows[0]
+        const paid = await client.query(
+          `SELECT coalesce(sum(amount_cents), 0)::integer AS paid_cents
+           FROM patient_payments
+           WHERE charge_id = $1 AND status = 'posted'`,
+          [chargeId],
+        )
+        if (amountCents > charge.total_cents - paid.rows[0].paid_cents) {
+          return { outcome: 'amount_exceeds_balance' }
+        }
+        const inserted = await client.query(
+          `INSERT INTO patient_payments (
+             charge_id, amount_cents, method, external_reference,
+             recorded_by_staff_id, received_at
+           ) VALUES ($1, $2, $3, $4, $5, $6)
+           RETURNING id`,
+          [chargeId, amountCents, method, reference, staffId, now],
+        )
+        await updateChargeStatus(client, chargeId, now)
+        const [updated] = await loadCharges(client, 'c.id = $1', [chargeId], true)
+        return { outcome: 'created', paymentId: inserted.rows[0].id, charge: updated }
+      })
+    },
+
+    async voidPatientPayment({ paymentId, staffId, reason, now }) {
+      return db.transaction(async (client) => {
+        const selected = await client.query(
+          `SELECT p.charge_id
+           FROM patient_payments p
+           JOIN patient_charges c ON c.id = p.charge_id
+           WHERE p.id = $1 AND p.status = 'posted'
+           FOR UPDATE OF c, p`,
+          [paymentId],
+        )
+        if (!selected.rowCount) return { outcome: 'not_found' }
+        await client.query(
+          `UPDATE patient_payments
+           SET status = 'voided', voided_by_staff_id = $2, voided_at = $3, void_reason = $4
+           WHERE id = $1 AND status = 'posted'
+          `,
+          [paymentId, staffId, now, reason],
+        )
+        const chargeId = selected.rows[0].charge_id
+        await updateChargeStatus(client, chargeId, now)
+        const [charge] = await loadCharges(client, 'c.id = $1', [chargeId], true)
+        return { outcome: 'voided', charge }
+      })
+    },
+
     async updateReceptionRequest({ id, action, clinicNote, now }) {
       return db.transaction(async (client) => {
         const selected = await client.query(
@@ -552,7 +810,7 @@ export function createStore(db) {
 
     async searchReceptionPatients(query) {
       const result = await db.query(
-        `SELECT id, display_name, patient_number, phone_e164
+        `SELECT id, display_name, patient_number, phone_e164, age, gender
          FROM patients
          WHERE portal_enabled = true
            AND (
@@ -568,6 +826,8 @@ export function createStore(db) {
         displayName: row.display_name,
         patientNumber: row.patient_number,
         phone: row.phone_e164,
+        age: row.age,
+        gender: row.gender,
       }))
     },
 
@@ -575,12 +835,14 @@ export function createStore(db) {
       displayName,
       normalizedName,
       phoneE164,
+      age,
+      gender,
       now,
     }) {
       return db.transaction(async (client) => {
         await client.query(`SELECT pg_advisory_xact_lock(hashtext('dental_portal.patient_number'))`)
         const existing = await client.query(
-          `SELECT id, display_name, patient_number, phone_e164
+          `SELECT id, display_name, patient_number, phone_e164, age, gender
            FROM patients
            WHERE normalized_name = $1
            LIMIT 1`,
@@ -599,10 +861,10 @@ export function createStore(db) {
           const result = await client.query(
             `INSERT INTO patients (
                patient_number, display_name, normalized_name, phone_e164,
-               phone_verified_at, portal_enabled, created_at, updated_at
-             ) VALUES ($1, $2, $3, $4, NULL, true, $5, $5)
-             RETURNING id, display_name, patient_number, phone_e164`,
-            [patientNumber, displayName, normalizedName, phoneE164, now],
+               phone_verified_at, portal_enabled, age, gender, created_at, updated_at
+             ) VALUES ($1, $2, $3, $4, NULL, true, $5, $6, $7, $7)
+             RETURNING id, display_name, patient_number, phone_e164, age, gender`,
+            [patientNumber, displayName, normalizedName, phoneE164, age, gender, now],
           )
           const row = result.rows[0]
           return {
@@ -612,6 +874,8 @@ export function createStore(db) {
               displayName: row.display_name,
               patientNumber: row.patient_number,
               phone: row.phone_e164,
+              age: row.age,
+              gender: row.gender,
             },
           }
         } catch (error) {

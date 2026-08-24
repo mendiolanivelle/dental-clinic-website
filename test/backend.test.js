@@ -117,6 +117,7 @@ class MemoryStore {
     ]
     this.sessions = new Map()
     this.staffSessions = new Map()
+    this.charges = []
     this.audits = []
     this.healthy = true
   }
@@ -249,6 +250,99 @@ class MemoryStore {
     return { appointments: [], appointmentRequests: await this.listReceptionRequests() }
   }
 
+  async listReceptionBilling() {
+    return {
+      awaitingCheckout: this.appointments
+        .filter(({ status }) => ['scheduled', 'confirmed'].includes(status))
+        .map((appointment) => ({
+          ...appointment,
+          patient: {
+            id: appointment.patientId,
+            displayName: this.patient.displayName,
+            patientNumber: this.patient.patientNumber,
+            phone: '+639000000001',
+          },
+        })),
+      charges: this.charges,
+      todayPayments: [],
+    }
+  }
+
+  async createPatientCheckout(input) {
+    const appointment = this.appointments.find(
+      ({ id, status }) => id === input.appointmentId && ['scheduled', 'confirmed'].includes(status),
+    )
+    if (!appointment) return { outcome: 'not_found' }
+    const totalCents = input.subtotalCents - input.discountCents
+    if (totalCents <= 0 || input.paymentAmountCents > totalCents) return { outcome: 'invalid_amount' }
+    appointment.status = 'completed'
+    const charge = {
+      id: 'a0000000-0000-4000-8000-000000000001',
+      recordNumber: '1',
+      appointmentId: appointment.id,
+      description: input.description,
+      subtotalCents: input.subtotalCents,
+      discountCents: input.discountCents,
+      totalCents,
+      status: input.paymentAmountCents === totalCents ? 'paid' : input.paymentAmountCents ? 'partially_paid' : 'unpaid',
+      invoiceReference: input.invoiceReference,
+      patient: { id: this.patient.id, displayName: this.patient.displayName, patientNumber: this.patient.patientNumber },
+      payments: input.paymentAmountCents ? [{
+        id: 'b0000000-0000-4000-8000-000000000001',
+        amountCents: input.paymentAmountCents,
+        method: input.paymentMethod,
+        reference: input.paymentReference,
+        status: 'posted',
+        receivedAt: input.now,
+      }] : [],
+      paidCents: input.paymentAmountCents,
+      balanceCents: totalCents - input.paymentAmountCents,
+      createdAt: input.now,
+    }
+    this.charges.unshift(charge)
+    return { outcome: 'created', charge }
+  }
+
+  async addPatientPayment(input) {
+    const charge = this.charges.find(({ id }) => id === input.chargeId)
+    if (!charge) return { outcome: 'not_found' }
+    if (input.amountCents > charge.balanceCents) return { outcome: 'amount_exceeds_balance' }
+    const payment = {
+      id: 'b0000000-0000-4000-8000-000000000002',
+      amountCents: input.amountCents,
+      method: input.method,
+      reference: input.reference,
+      status: 'posted',
+      receivedAt: input.now,
+    }
+    charge.payments.push(payment)
+    charge.paidCents += input.amountCents
+    charge.balanceCents -= input.amountCents
+    charge.status = charge.balanceCents ? 'partially_paid' : 'paid'
+    return { outcome: 'created', paymentId: payment.id, charge }
+  }
+
+  async voidPatientPayment(input) {
+    const charge = this.charges.find(({ payments }) => payments.some(({ id }) => id === input.paymentId))
+    const payment = charge?.payments.find(({ id, status }) => id === input.paymentId && status === 'posted')
+    if (!payment) return { outcome: 'not_found' }
+    payment.status = 'voided'
+    payment.voidReason = input.reason
+    charge.paidCents -= payment.amountCents
+    charge.balanceCents += payment.amountCents
+    charge.status = charge.paidCents ? 'partially_paid' : 'unpaid'
+    return { outcome: 'voided', charge }
+  }
+
+  async listPatientBilling(patientId) {
+    return this.charges
+      .filter(({ patient }) => patient.id === patientId)
+      .map((charge) => ({
+        ...charge,
+        payments: charge.payments.filter(({ status }) => status === 'posted'),
+      }))
+  }
+
   async updateReceptionRequest({ id, action }) {
     const request = this.appointmentRequests.find((item) => item.id === id && item.status === 'requested')
     if (!request) return { outcome: 'not_found' }
@@ -275,6 +369,8 @@ class MemoryStore {
           displayName: this.patient.displayName,
           patientNumber: this.patient.patientNumber,
           phone: '+639000000001',
+          age: 28,
+          gender: 'female',
         }]
       : []
   }
@@ -286,6 +382,8 @@ class MemoryStore {
       displayName: input.displayName,
       patientNumber: '00001',
       phone: input.phoneE164,
+      age: input.age,
+      gender: input.gender,
       enabled: true,
     }
     this.createdPatient = patient
@@ -677,11 +775,66 @@ test('reception staff use a separate protected session and can confirm booking r
       method: 'POST',
       url: '/api/staff/patients',
       headers: { origin: config.publicOrigin, cookie },
-      payload: { displayName: 'New Patient', phone: '+639123456789' },
+      payload: {
+        displayName: 'New Patient',
+        phone: '+639123456789',
+        age: 34,
+        gender: 'prefer_not_to_say',
+      },
     })
     assert.equal(createdPatient.statusCode, 201)
     assert.match(createdPatient.json().patient.patientNumber, /^\d{5}$/)
     assert.equal(createdPatient.json().patient.displayName, 'New Patient')
+    assert.equal(createdPatient.json().patient.age, 34)
+
+    const billing = await staffApp.inject({ url: '/api/staff/billing', headers: { cookie } })
+    assert.equal(billing.statusCode, 200)
+    assert.equal(billing.json().awaitingCheckout[0].id, '30000000-0000-4000-8000-000000000001')
+
+    const checkout = await staffApp.inject({
+      method: 'POST',
+      url: '/api/staff/appointments/30000000-0000-4000-8000-000000000001/checkout',
+      headers: { origin: config.publicOrigin, cookie },
+      payload: {
+        description: 'Brace adjustment',
+        subtotalCents: 250000,
+        discountCents: 50000,
+        paymentAmountCents: 100000,
+        paymentMethod: 'cash',
+        invoiceReference: 'INV-1001',
+      },
+    })
+    assert.equal(checkout.statusCode, 201)
+    assert.equal(checkout.json().charge.status, 'partially_paid')
+    assert.equal(checkout.json().charge.balanceCents, 100000)
+
+    const finalPayment = await staffApp.inject({
+      method: 'POST',
+      url: `/api/staff/charges/${checkout.json().charge.id}/payments`,
+      headers: { origin: config.publicOrigin, cookie },
+      payload: { amountCents: 100000, method: 'gcash', reference: 'GC-1001' },
+    })
+    assert.equal(finalPayment.statusCode, 201)
+    assert.equal(finalPayment.json().charge.status, 'paid')
+
+    const voided = await staffApp.inject({
+      method: 'POST',
+      url: `/api/staff/payments/${finalPayment.json().charge.payments[1].id}/void`,
+      headers: { origin: config.publicOrigin, cookie },
+      payload: { reason: 'Incorrect transaction reference' },
+    })
+    assert.equal(voided.statusCode, 200)
+    assert.equal(voided.json().charge.status, 'partially_paid')
+
+    const patientLogin = await staffPost('/api/auth/login', {
+      fullName: staffStore.patient.displayName,
+      patientNumber: staffStore.patient.patientNumber,
+    })
+    const patientCookie = patientLogin.headers['set-cookie'].split(';')[0]
+    const patientBilling = await staffApp.inject({ url: '/api/me/billing', headers: { cookie: patientCookie } })
+    assert.equal(patientBilling.statusCode, 200)
+    assert.equal(patientBilling.json().charges[0].payments.length, 1)
+    assert.equal(patientBilling.json().charges[0].balanceCents, 100000)
 
     const confirmed = await staffApp.inject({
       method: 'PATCH',
@@ -805,6 +958,10 @@ test('patient endpoints require authentication and enforce patient ownership and
     ['50000000-0000-4000-8000-000000000001'],
   )
   assert.equal(records.headers['cache-control'], 'no-store')
+
+  const billing = await app.inject({ url: '/api/me/billing', headers: { cookie } })
+  assert.equal(billing.statusCode, 200)
+  assert.deepEqual(billing.json().charges, [])
 
   for (const id of [
     '50000000-0000-4000-8000-000000000002',

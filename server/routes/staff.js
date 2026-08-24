@@ -37,6 +37,19 @@ const dateQuery = {
   properties: { date: { type: 'string', format: 'date' } },
 }
 
+const paymentMethods = ['cash', 'gcash', 'maya', 'card', 'bank_transfer', 'other']
+
+const paymentBody = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['amountCents', 'method'],
+  properties: {
+    amountCents: { type: 'integer', minimum: 1, maximum: 100_000_000 },
+    method: { type: 'string', enum: paymentMethods },
+    reference: { type: 'string', maxLength: 120 },
+  },
+}
+
 const manilaDate = (date) =>
   new Date(date.getTime() + 8 * 60 * 60_000).toISOString().slice(0, 10)
 
@@ -227,6 +240,137 @@ export default async function staffRoutes(
     },
   )
 
+  app.get('/api/staff/billing', { preHandler: requireReception }, async (request) => {
+    const billing = await store.listReceptionBilling(manilaDate(now()))
+    await audit(request, 'staff.billing_viewed')
+    return billing
+  })
+
+  app.post(
+    '/api/staff/appointments/:id/checkout',
+    {
+      preHandler: requireReception,
+      schema: {
+        params: idParams,
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['description', 'subtotalCents', 'discountCents', 'paymentAmountCents'],
+          properties: {
+            description: { type: 'string', minLength: 1, maxLength: 240 },
+            subtotalCents: { type: 'integer', minimum: 1, maximum: 100_000_000 },
+            discountCents: { type: 'integer', minimum: 0, maximum: 100_000_000 },
+            paymentAmountCents: { type: 'integer', minimum: 0, maximum: 100_000_000 },
+            paymentMethod: { type: 'string', enum: paymentMethods },
+            paymentReference: { type: 'string', maxLength: 120 },
+            invoiceReference: { type: 'string', maxLength: 120 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const description = request.body.description.trim()
+      if (!description || (request.body.paymentAmountCents > 0 && !request.body.paymentMethod)) {
+        return reply.code(400).send({
+          error: { code: 'INVALID_REQUEST', message: 'Complete the service and payment details.' },
+        })
+      }
+      const result = await store.createPatientCheckout({
+        appointmentId: request.params.id,
+        staffId: request.staff.id,
+        description,
+        subtotalCents: request.body.subtotalCents,
+        discountCents: request.body.discountCents,
+        paymentAmountCents: request.body.paymentAmountCents,
+        paymentMethod: request.body.paymentMethod || null,
+        paymentReference: request.body.paymentReference?.trim() || null,
+        invoiceReference: request.body.invoiceReference?.trim() || null,
+        now: now(),
+      })
+      if (result.outcome === 'not_found') {
+        return reply.code(404).send({
+          error: { code: 'NOT_FOUND', message: 'That appointment is no longer ready for checkout.' },
+        })
+      }
+      if (result.outcome === 'already_checked_out') {
+        return reply.code(409).send({
+          error: { code: 'ALREADY_CHECKED_OUT', message: 'That appointment has already been checked out.' },
+        })
+      }
+      if (result.outcome === 'invalid_amount') {
+        return reply.code(400).send({
+          error: { code: 'INVALID_AMOUNT', message: 'The discount or payment is greater than the charge.' },
+        })
+      }
+      await audit(request, 'staff.patient_checkout_created', 'patient_charge', result.charge.id)
+      return reply.code(201).send({ charge: result.charge })
+    },
+  )
+
+  app.post(
+    '/api/staff/charges/:id/payments',
+    { preHandler: requireReception, schema: { params: idParams, body: paymentBody } },
+    async (request, reply) => {
+      const result = await store.addPatientPayment({
+        chargeId: request.params.id,
+        staffId: request.staff.id,
+        amountCents: request.body.amountCents,
+        method: request.body.method,
+        reference: request.body.reference?.trim() || null,
+        now: now(),
+      })
+      if (result.outcome === 'not_found') {
+        return reply.code(404).send({
+          error: { code: 'NOT_FOUND', message: 'That payment record was not found.' },
+        })
+      }
+      if (result.outcome === 'amount_exceeds_balance') {
+        return reply.code(400).send({
+          error: { code: 'INVALID_AMOUNT', message: 'The payment is greater than the remaining balance.' },
+        })
+      }
+      await audit(request, 'staff.patient_payment_recorded', 'patient_payment', result.paymentId)
+      return reply.code(201).send({ charge: result.charge })
+    },
+  )
+
+  app.post(
+    '/api/staff/payments/:id/void',
+    {
+      preHandler: requireReception,
+      schema: {
+        params: idParams,
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['reason'],
+          properties: { reason: { type: 'string', minLength: 3, maxLength: 240 } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const reason = request.body.reason.trim()
+      if (reason.length < 3) {
+        return reply.code(400).send({
+          error: { code: 'INVALID_REQUEST', message: 'Enter a reason for voiding the payment.' },
+        })
+      }
+      const result = await store.voidPatientPayment({
+        paymentId: request.params.id,
+        staffId: request.staff.id,
+        reason,
+        now: now(),
+      })
+      if (result.outcome === 'not_found') {
+        return reply.code(404).send({
+          error: { code: 'NOT_FOUND', message: 'That active payment was not found.' },
+        })
+      }
+      await audit(request, 'staff.patient_payment_voided', 'patient_payment', request.params.id)
+      return { charge: result.charge }
+    },
+  )
+
   app.get(
     '/api/staff/patients',
     {
@@ -255,10 +399,15 @@ export default async function staffRoutes(
         body: {
           type: 'object',
           additionalProperties: false,
-          required: ['displayName'],
+          required: ['displayName', 'age', 'gender'],
           properties: {
             displayName: { type: 'string', minLength: 2, maxLength: 160 },
             phone: { type: 'string', maxLength: 32, pattern: '^[+0-9 ()-]*$' },
+            age: { type: 'integer', minimum: 0, maximum: 130 },
+            gender: {
+              type: 'string',
+              enum: ['female', 'male', 'non_binary', 'prefer_not_to_say'],
+            },
           },
         },
       },
@@ -278,6 +427,8 @@ export default async function staffRoutes(
           displayName,
           normalizedName,
           phoneE164,
+          age: request.body.age,
+          gender: request.body.gender,
           now: now(),
         })
         if (result.outcome === 'already_exists') {

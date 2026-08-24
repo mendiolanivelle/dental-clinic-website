@@ -13,6 +13,7 @@ import TreatmentPlanPage from './pages/TreatmentPlanPage'
 import ReceptionLayout from './components/ReceptionLayout'
 import ReceptionCalendarPage from './pages/ReceptionCalendarPage'
 import ReceptionDashboardPage from './pages/ReceptionDashboardPage'
+import ReceptionBillingPage from './pages/ReceptionBillingPage'
 import ReceptionPatientsPage from './pages/ReceptionPatientsPage'
 import ReceptionRequestsPage from './pages/ReceptionRequestsPage'
 import { patientFrom } from './portalData'
@@ -147,6 +148,7 @@ export default function App() {
         <Route index element={<ReceptionDashboardPage />} />
         <Route path="requests" element={<ReceptionRequestsPage />} />
         <Route path="calendar" element={<ReceptionCalendarPage />} />
+        <Route path="billing" element={<ReceptionBillingPage />} />
         <Route path="patients" element={<ReceptionPatientsPage />} />
       </Route>
       <Route path="*" element={<Navigate replace to={authenticated ? home : '/login'} />} />
