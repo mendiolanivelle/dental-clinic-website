@@ -46,6 +46,18 @@ export function formatCurrency(cents = 0) {
   }).format(cents / 100)
 }
 
+export function calendarWeek(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value || '')) return []
+  const date = new Date(`${value}T00:00:00Z`)
+  if (Number.isNaN(date.getTime())) return []
+  date.setUTCDate(date.getUTCDate() - date.getUTCDay())
+  return Array.from({ length: 7 }, (_, index) => {
+    const day = new Date(date)
+    day.setUTCDate(day.getUTCDate() + index)
+    return day.toISOString().slice(0, 10)
+  })
+}
+
 export function formatInterval(days) {
   if (!days || days < 1) return 'As advised by your dentist'
   if (days % 365 === 0) return `Every ${days / 365} year${days === 365 ? '' : 's'}`
