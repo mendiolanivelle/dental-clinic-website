@@ -269,18 +269,23 @@ export default function ReceptionCalendarPage() {
   const weekEnd = weekDates[6]
 
   return <>
-    <div className="mb-8 flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
-      <div>
+    <div className="mb-8 grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(460px,0.8fr)] xl:items-end">
+      <div className="max-w-2xl">
         <p className="text-xs font-extrabold uppercase tracking-[.18em] text-brand/60">Clinic schedule</p>
         <h1 className="mt-2 text-3xl font-extrabold tracking-tight">Weekly appointment calendar</h1>
         <p className="mt-2 text-sm text-ink/50">Sunday to Saturday · Click an available day to add a schedule, or select a booking to view details.</p>
       </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <button aria-label="Previous week" className="rounded-xl bg-white p-2.5 text-brand shadow-sm hover:bg-mint" onClick={() => setWeekStart(shiftDate(weekStart, -7))} type="button"><ChevronLeft size={19} /></button>
-        <button className="rounded-xl bg-white px-4 py-2.5 text-xs font-extrabold text-brand shadow-sm hover:bg-mint" onClick={() => setWeekStart(calendarWeek(today)[0])} type="button">This week</button>
-        <button aria-label="Next week" className="rounded-xl bg-white p-2.5 text-brand shadow-sm hover:bg-mint" onClick={() => setWeekStart(shiftDate(weekStart, 7))} type="button"><ChevronRight size={19} /></button>
-        <label className="ml-0 text-xs font-extrabold text-ink/50 sm:ml-2">Jump to date
-          <input className="ml-2 rounded-xl border border-ink/10 bg-white px-3 py-2 text-sm text-ink" type="date" value={weekStart} onChange={(event) => setWeekStart(calendarWeek(event.target.value)[0] || weekStart)} />
+      <div className="grid w-full gap-3 sm:grid-cols-[auto_minmax(190px,1fr)] sm:items-end xl:w-auto xl:justify-self-end">
+        <div>
+          <p className="mb-2 text-xs font-extrabold text-ink/50">Week navigation</p>
+          <div className="inline-flex h-11 items-center rounded-xl bg-white p-1 shadow-sm">
+            <button aria-label="Previous week" className="grid h-9 w-9 place-items-center rounded-lg text-brand hover:bg-mint" onClick={() => setWeekStart(shiftDate(weekStart, -7))} type="button"><ChevronLeft size={19} /></button>
+            <button className="h-9 rounded-lg px-4 text-xs font-extrabold text-brand hover:bg-mint" onClick={() => setWeekStart(calendarWeek(today)[0])} type="button">This week</button>
+            <button aria-label="Next week" className="grid h-9 w-9 place-items-center rounded-lg text-brand hover:bg-mint" onClick={() => setWeekStart(shiftDate(weekStart, 7))} type="button"><ChevronRight size={19} /></button>
+          </div>
+        </div>
+        <label className="block text-xs font-extrabold text-ink/50">Jump to date
+          <input className="mt-2 h-11 w-full rounded-xl border border-ink/10 bg-white px-3 text-sm font-semibold text-ink shadow-sm" type="date" value={weekStart} onChange={(event) => setWeekStart(calendarWeek(event.target.value)[0] || weekStart)} />
         </label>
       </div>
     </div>
