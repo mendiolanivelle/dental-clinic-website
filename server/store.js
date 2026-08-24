@@ -491,6 +491,17 @@ export function createStore(db) {
       )
     },
 
+    async findActiveStaffLogin(normalizedName) {
+      const result = await db.query(
+        `SELECT email
+         FROM staff_profiles
+         WHERE normalized_name = $1 AND active = true
+         LIMIT 1`,
+        [normalizedName],
+      )
+      return result.rows[0] || null
+    },
+
     async createStaffSessionForLogin({
       authUserId,
       sessionId,

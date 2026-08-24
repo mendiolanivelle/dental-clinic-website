@@ -13,7 +13,7 @@ import {
 const loginError = Object.freeze({
   error: {
     code: 'INVALID_CREDENTIALS',
-    message: 'The email or password is not recognized.',
+    message: 'The name or password is not recognized.',
   },
 })
 
@@ -98,9 +98,9 @@ export default async function staffRoutes(
         body: {
           type: 'object',
           additionalProperties: false,
-          required: ['email', 'password'],
+          required: ['fullName', 'password'],
           properties: {
-            email: { type: 'string', format: 'email', maxLength: 254 },
+            fullName: { type: 'string', minLength: 2, maxLength: 160 },
             password: { type: 'string', minLength: 8, maxLength: 200 },
           },
         },
@@ -116,8 +116,9 @@ export default async function staffRoutes(
 
       let identity
       try {
+        const staffLogin = await store.findActiveStaffLogin(normalizeName(request.body.fullName))
         identity = await verifyStaffCredentials({
-          email: request.body.email.trim().toLowerCase(),
+          email: staffLogin?.email || 'unknown-staff@invalid.local',
           password: request.body.password,
         })
       } catch (error) {

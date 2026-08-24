@@ -204,6 +204,12 @@ class MemoryStore {
     return phoneE164
   }
 
+  async findActiveStaffLogin(normalizedName) {
+    return this.staff.active && normalizedName === normalizeName(this.staff.displayName)
+      ? { email: this.staff.email }
+      : null
+  }
+
   async createStaffSessionForLogin(input) {
     if (!this.staff.active || input.authUserId !== this.staff.authUserId) return null
     this.staffSessions.set(input.tokenDigest, {
@@ -987,14 +993,14 @@ test('reception staff use a separate protected session and can confirm booking r
   })
   try {
     const invalid = await staffPost('/api/staff/auth/login', {
-      email: staffStore.staff.email,
+      fullName: staffStore.staff.displayName,
       password: 'wrong-password',
     })
     assert.equal(invalid.statusCode, 401)
     assert.equal(invalid.json().error.code, 'INVALID_CREDENTIALS')
 
     const loggedIn = await staffPost('/api/staff/auth/login', {
-      email: staffStore.staff.email,
+      fullName: '  RINA   reception ',
       password: 'correct-password',
     })
     assert.equal(loggedIn.statusCode, 200)
@@ -1286,7 +1292,7 @@ test('dentist staff can restore their staff session but cannot use reception end
       method: 'POST',
       url: '/api/staff/auth/login',
       headers: { origin: config.publicOrigin },
-      payload: { email: dentistStore.staff.email, password: 'correct-password' },
+      payload: { fullName: dentistStore.staff.displayName, password: 'correct-password' },
     })
     assert.equal(loggedIn.statusCode, 200)
     assert.equal(loggedIn.json().staff.role, 'dentist')

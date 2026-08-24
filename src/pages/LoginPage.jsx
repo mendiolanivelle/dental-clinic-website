@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useLocation } from 'react-router-dom'
-import { ArrowRight, Clock3, IdCard, KeyRound, LockKeyhole, Mail, Phone, Sparkles, UserRound } from 'lucide-react'
+import { ArrowRight, Clock3, IdCard, KeyRound, LockKeyhole, Phone, Sparkles, UserRound } from 'lucide-react'
 import { api } from '../api'
 import AuthLayout from '../components/AuthLayout'
 import ClinicPhoneLink from '../components/ClinicPhoneLink'
@@ -78,7 +78,7 @@ export default function LoginPage({ onAuthenticated, onStaffAuthenticated }) {
   const [access, setAccess] = useState('patient')
   const [fullName, setFullName] = useState('')
   const [patientCredential, setPatientCredential] = useState('')
-  const [email, setEmail] = useState('')
+  const [staffName, setStaffName] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -92,15 +92,15 @@ export default function LoginPage({ onAuthenticated, onStaffAuthenticated }) {
       setError('Enter your full name and patient ID or mobile number to continue.')
       return
     }
-    if (access === 'staff' && (!email.trim() || !password)) {
-      setError('Enter your work email and password to continue.')
+    if (access === 'staff' && (!staffName.trim() || !password)) {
+      setError('Enter your full name and password to continue.')
       return
     }
 
     setSubmitting(true)
     try {
       if (access === 'staff') {
-        const result = await api.staffLogin({ email: email.trim(), password })
+        const result = await api.staffLogin({ fullName: staffName.trim(), password })
         onStaffAuthenticated(result.staff)
       } else {
         const result = await api.login({
@@ -114,7 +114,7 @@ export default function LoginPage({ onAuthenticated, onStaffAuthenticated }) {
         requestError.status === 429
           ? requestError.message
           : access === 'staff'
-            ? requestError.message || 'The email or password is not recognized.'
+            ? requestError.message || 'The name or password is not recognized.'
             : 'The submitted patient details are not recognized. Please check them or call the clinic.',
       )
     } finally {
@@ -213,17 +213,18 @@ export default function LoginPage({ onAuthenticated, onStaffAuthenticated }) {
           </div>
         </> : <>
           <div>
-            <label className="mb-2 block text-sm font-extrabold" htmlFor="staffEmail">Work email</label>
+            <label className="mb-2 block text-sm font-extrabold" htmlFor="staffName">Full name</label>
             <div className="relative">
-              <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-ink/30" size={18} />
+              <UserRound className="absolute left-4 top-1/2 -translate-y-1/2 text-ink/30" size={18} />
               <input
-                id="staffEmail"
+                id="staffName"
                 className="input-field"
-                type="email"
+                type="text"
                 autoComplete="username"
-                placeholder="reception@clinic.com"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
+                autoCapitalize="words"
+                placeholder="First Middle Last"
+                value={staffName}
+                onChange={(event) => setStaffName(event.target.value)}
                 disabled={submitting}
                 required
               />
