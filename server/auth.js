@@ -8,10 +8,10 @@ export const normalizeName = (value) =>
 
 export const normalizePatientNumber = (value) => value.normalize('NFKC').trim().toUpperCase()
 
-export const normalizeMobileNumber = (value) => {
-  const digits = value.normalize('NFKC').replace(/[^0-9]/gu, '')
-  const local = digits.startsWith('63') ? digits.slice(2) : digits.startsWith('0') ? digits.slice(1) : digits
-  return /^9[0-9]{9}$/.test(local) ? `63${local}` : ''
+export const normalizePhone = (value) => {
+  const digits = value.normalize('NFKC').replace(/\D/gu, '')
+  if (/^09\d{9}$/.test(digits)) return `63${digits.slice(1)}`
+  return /^639\d{9}$/.test(digits) ? digits : ''
 }
 
 export const hmacDigest = (pepper, value) =>

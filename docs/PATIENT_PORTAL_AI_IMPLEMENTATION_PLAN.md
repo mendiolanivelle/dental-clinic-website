@@ -11,7 +11,7 @@ Application: SmileCare Dental Patient Portal
 Provide a simple patient portal with two sign-in options:
 
 1. the full name stored by the clinic plus the clinic-issued patient ID; or
-2. the unique Philippine mobile number stored by the clinic.
+2. the full name stored by the clinic plus the mobile number recorded in the patient profile.
 
 If both values match an enabled patient, open an authenticated portal session.
 There is no self-registration, password, SMS, or one-time-code flow.
@@ -30,10 +30,10 @@ not an automatic confirmation; clinic staff must review it.
 
 ## 2. Security boundary
 
-The full name is not secret. The patient ID is the stronger private credential.
-A mobile number is easier to discover, so mobile login is allowed only for one
-exact normalized match and remains protected by the same strict failed-login
-rate limits, generic errors, audit trail, and opaque sessions.
+The full name is not secret. The patient must also provide either the clinic-issued
+patient ID or the mobile number recorded in the patient profile. Mobile numbers
+are easier to discover, so strict failed-login limits, generic errors, auditing,
+and opaque sessions remain mandatory.
 
 Production patient IDs must therefore be:
 
@@ -107,15 +107,16 @@ Fastify serves the built React application and the API from container port
 
 `/login`
 
-The patient form has two modes:
+The patient form contains:
 
-- `fullName` plus `patientNumber`; or
-- `mobileNumber`.
+- `fullName`
+- a Patient ID / Mobile number method selector; and
+- exactly one of `patientNumber` or `phone`.
 
 On submit:
 
-1. trim the selected mode's fields;
-2. uppercase the patient ID or normalize the Philippine mobile number;
+1. trim the fields;
+2. uppercase a patient ID or normalize a Philippine mobile number;
 3. call `POST /api/auth/login`;
 4. pass the returned patient summary to the application authentication state;
 5. redirect to `/portal`; and
@@ -163,24 +164,18 @@ Origin: https://dental.exodiagamedev.com
 }
 ```
 
-Or:
-
-```json
-{
-  "mobileNumber": "0917 123 4567"
-}
-```
+Alternatively, send `"phone": "09171234567"` instead of `patientNumber`.
 
 Validation:
 
 - reject extra properties;
 - `fullName`: string, 1 to 160 characters;
 - `patientNumber`: string, 4 to 40 characters;
+- `phone`: Philippine mobile number, accepted as `09...`, `+639...`, or `639...`;
+- require exactly one of `patientNumber` or `phone`;
 - normalize Unicode, trim, and collapse name whitespace;
-- normalize the patient ID to uppercase;
-- permit only uppercase letters, digits, and hyphens in the normalized ID; and
-- alternatively accept only `mobileNumber`, normalize `09…`, `9…`, and `+63…`
-  Philippine formats, and authenticate only when exactly one enabled patient matches.
+- normalize the patient ID to uppercase; and
+- permit only uppercase letters, digits, and hyphens in the normalized ID.
 
 Success:
 
@@ -503,8 +498,7 @@ must verify the Supabase CA and hostname. Never set
 
 The work is complete only when:
 
-- a valid full name and patient ID, or one unique registered mobile number,
-  opens the portal directly;
+- a valid full name with either the patient ID or recorded mobile number opens the portal directly;
 - no registration, password, SMS, or one-time-code screen or dependency
   remains;
 - invalid credentials cannot create a session or reveal account existence;

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { after, before, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { buildApp } from '../server/app.js'
-import { normalizeMobileNumber, normalizeName, normalizePatientNumber, sha256 } from '../server/auth.js'
+import { normalizeName, normalizePatientNumber, normalizePhone, sha256 } from '../server/auth.js'
 import { loadConfig } from '../server/config.js'
 
 const config = {
@@ -129,7 +129,6 @@ class MemoryStore {
     ]
     this.sessions = new Map()
     this.staffSessions = new Map()
-    this.mobileMatches = 1
     this.charges = []
     this.audits = []
     this.healthy = true
@@ -140,12 +139,13 @@ class MemoryStore {
   }
 
   async createSessionForLogin(input) {
-    const validNameAndId = input.normalizedName === normalizeName(this.patient.displayName) &&
-      input.patientNumber === this.patient.patientNumber
-    const validMobile = input.mobileNumber === normalizeMobileNumber(this.patient.phone) && this.mobileMatches === 1
+    const credentialMatches = input.patientNumber
+      ? input.patientNumber === this.patient.patientNumber
+      : input.phoneDigits === normalizePhone(this.patient.phone)
     if (
       !this.patient.enabled ||
-      (!validNameAndId && !validMobile)
+      input.normalizedName !== normalizeName(this.patient.displayName) ||
+      !credentialMatches
     ) {
       this.audits.push({
         actorType: 'anonymous',
@@ -579,9 +579,9 @@ const loginKnownPatient = () =>
 test('normalization and production configuration security', () => {
   assert.equal(normalizeName('  PATRICIA　PORTAL  DEMO '), 'patricia portal demo')
   assert.equal(normalizePatientNumber(' pt-ab12 '), 'PT-AB12')
-  assert.equal(normalizeMobileNumber('0917 123 4567'), '639171234567')
-  assert.equal(normalizeMobileNumber('+63 917-123-4567'), '639171234567')
-  assert.equal(normalizeMobileNumber('12345'), '')
+  assert.equal(normalizePhone('+63 900 000 0001'), '639000000001')
+  assert.equal(normalizePhone('0900-000-0001'), '639000000001')
+  assert.equal(normalizePhone('12345'), '')
   assert.throws(
     () =>
       loadConfig({
@@ -623,8 +623,14 @@ test('request schemas reject missing and unexpected login fields', async () => {
     patientNumber: 'PT-DEMO01',
     patientId: store.otherPatientId,
   })
+  const multipleCredentials = await post('/api/auth/login', {
+    fullName: 'Patricia Portal Demo',
+    patientNumber: 'PT-DEMO01',
+    phone: '09000000001',
+  })
   assert.equal(missing.statusCode, 400)
   assert.equal(unexpected.statusCode, 400)
+  assert.equal(multipleCredentials.statusCode, 400)
 })
 
 test('direct login returns a generic failure and exposes no OTP endpoints', async () => {
@@ -701,15 +707,13 @@ test('direct login creates a hashed opaque session and logout revokes it', async
   assert.equal(afterLogout.statusCode, 401)
 })
 
-test('a unique registered mobile number creates the same protected patient session', async () => {
-  const loggedIn = await post('/api/auth/login', { mobileNumber: '0900 000 0001' })
+test('patient can log in with the recorded mobile number', async () => {
+  const loggedIn = await post('/api/auth/login', {
+    fullName: 'Patricia Portal Demo',
+    phone: '0900 000 0001',
+  })
   assert.equal(loggedIn.statusCode, 200)
-  assert.equal(loggedIn.json().patient.patientNumber, 'PT-DEMO01')
   assert.match(loggedIn.headers['set-cookie'], /__Host-portal_session=/)
-
-  store.mobileMatches = 2
-  assert.equal((await post('/api/auth/login', { mobileNumber: '+63 900 000 0001' })).statusCode, 401)
-  store.mobileMatches = 1
 })
 
 test('disabled portal access cannot create a session', async () => {

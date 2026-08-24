@@ -5,6 +5,7 @@ import {
   createSessionToken,
   ipDigest,
   normalizeName,
+  normalizePhone,
   sessionCookieOptions,
   sha256,
 } from '../auth.js'
@@ -415,10 +416,12 @@ export default async function staffRoutes(
     async (request, reply) => {
       const displayName = request.body.displayName.trim().replace(/\s+/gu, ' ')
       const normalizedName = normalizeName(displayName)
-      const phoneE164 = request.body.phone?.trim() || null
-      if (!normalizedName) {
+      const submittedPhone = request.body.phone?.trim() || ''
+      const phoneDigits = submittedPhone ? normalizePhone(submittedPhone) : ''
+      const phoneE164 = phoneDigits ? `+${phoneDigits}` : null
+      if (!normalizedName || (submittedPhone && !phoneDigits)) {
         return reply.code(400).send({
-          error: { code: 'INVALID_REQUEST', message: 'Enter the patient’s full name.' },
+          error: { code: 'INVALID_REQUEST', message: 'Enter a full name and a valid Philippine mobile number.' },
         })
       }
 
@@ -482,18 +485,20 @@ export default async function staffRoutes(
     async (request, reply) => {
       const displayName = request.body.displayName.trim().replace(/\s+/gu, ' ')
       const normalizedName = normalizeName(displayName)
+      const submittedPhone = request.body.phone?.trim() || ''
+      const phoneDigits = submittedPhone ? normalizePhone(submittedPhone) : ''
       const systolic = request.body.bloodPressureSystolic
       const diastolic = request.body.bloodPressureDiastolic
-      if (!normalizedName || (systolic === null) !== (diastolic === null) || (systolic !== null && systolic <= diastolic)) {
+      if (!normalizedName || (submittedPhone && !phoneDigits) || (systolic === null) !== (diastolic === null) || (systolic !== null && systolic <= diastolic)) {
         return reply.code(400).send({
-          error: { code: 'INVALID_REQUEST', message: 'Check the patient name and blood pressure values.' },
+          error: { code: 'INVALID_REQUEST', message: 'Check the patient name, mobile number, and blood pressure values.' },
         })
       }
       const result = await store.updateReceptionPatient({
         id: request.params.id,
         displayName,
         normalizedName,
-        phoneE164: request.body.phone?.trim() || null,
+        phoneE164: phoneDigits ? `+${phoneDigits}` : null,
         age: request.body.age,
         gender: request.body.gender,
         weightKg: request.body.weightKg,

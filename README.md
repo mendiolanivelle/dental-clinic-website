@@ -1,8 +1,8 @@
 # SmileCare Dental Portal
 
 A patient portal built with React, Vite, Tailwind CSS, Fastify, and
-Supabase-hosted PostgreSQL. Patients sign in with either the full name and
-patient ID recorded by the clinic or their unique registered mobile number. They can browse the clinic service
+Supabase-hosted PostgreSQL. Patients sign in with their full name plus either
+the clinic-issued patient ID or the mobile number recorded by the clinic. They can browse the clinic service
 catalog and choose an open doctor time from the hourly appointment calendar. There
 is no patient registration, password, SMS, or one-time-code step.
 
@@ -12,9 +12,8 @@ keeps staff sessions and permissions separate from patient access. Reception can
 also complete appointment checkout, record cash or external electronic payments,
 track balances, and reference the clinic's BIR-authorized invoice.
 
-> Direct login is intentionally simple. A mobile number is a weaker credential
-> than a private patient ID, so registered numbers must be unique and login
-> rate limits must remain strict. In production, patient IDs should also be
+> Direct login is intentionally simple. Mobile numbers are weaker credentials,
+> so failed-login limits must remain strict. In production, patient IDs must be
 > long, random, non-sequential, kept private, and replaced if disclosed. A
 > predictable chart number is not suitable as a portal credential.
 
@@ -94,11 +93,11 @@ invoice generation.
 
 ## Authentication and privacy
 
-`POST /api/auth/login` accepts either `fullName` plus `patientNumber`, or a
-single `mobileNumber`. The server normalizes the submitted fields, permits
-mobile login only for one exact unique patient match, strictly limits failed credentials, and returns the
-same generic error for an unknown, disabled, or mismatched account. Successful
-sign-ins and logout do not consume the failed-attempt budget.
+`POST /api/auth/login` accepts `fullName` with exactly one of `patientNumber` or
+`phone`. Philippine mobile formats are normalized before matching. The server
+strictly limits failed credentials and returns the same generic error for an
+unknown, disabled, or mismatched account. Successful sign-ins and logout do not
+consume the failed-attempt budget.
 
 Successful login creates a cryptographically random opaque session token. Only
 its SHA-256 digest is stored in PostgreSQL. The browser receives the token in a

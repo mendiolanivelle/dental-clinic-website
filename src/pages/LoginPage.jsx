@@ -77,8 +77,8 @@ export default function LoginPage({ onAuthenticated, onStaffAuthenticated }) {
   const [access, setAccess] = useState('patient')
   const [fullName, setFullName] = useState('')
   const [patientNumber, setPatientNumber] = useState('')
+  const [patientLoginMethod, setPatientLoginMethod] = useState('patient_id')
   const [mobileNumber, setMobileNumber] = useState('')
-  const [patientLoginMethod, setPatientLoginMethod] = useState('details')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -89,15 +89,10 @@ export default function LoginPage({ onAuthenticated, onStaffAuthenticated }) {
     event.preventDefault()
     setError('')
 
-    if (access === 'patient') {
-      if (patientLoginMethod === 'details' && (!fullName.trim() || !patientNumber.trim())) {
-        setError('Enter your full name and patient ID to continue.')
-        return
-      }
-      if (patientLoginMethod === 'mobile' && !mobileNumber.trim()) {
-        setError('Enter the mobile number registered with the clinic.')
-        return
-      }
+    const patientCredential = patientLoginMethod === 'patient_id' ? patientNumber : mobileNumber
+    if (access === 'patient' && (!fullName.trim() || !patientCredential.trim())) {
+      setError(`Enter your full name and ${patientLoginMethod === 'patient_id' ? 'patient ID' : 'mobile number'} to continue.`)
+      return
     }
     if (access === 'staff' && (!email.trim() || !password)) {
       setError('Enter your work email and password to continue.')
@@ -110,12 +105,12 @@ export default function LoginPage({ onAuthenticated, onStaffAuthenticated }) {
         const result = await api.staffLogin({ email: email.trim(), password })
         onStaffAuthenticated(result.staff)
       } else {
-        const result = await api.login(patientLoginMethod === 'mobile'
-          ? { mobileNumber: mobileNumber.trim() }
-          : {
-              fullName: fullName.trim(),
-              patientNumber: patientNumber.trim().toUpperCase(),
-            })
+        const result = await api.login({
+          fullName: fullName.trim(),
+          ...(patientLoginMethod === 'patient_id'
+            ? { patientNumber: patientNumber.trim().toUpperCase() }
+            : { phone: mobileNumber.trim() }),
+        })
         onAuthenticated(result.patient)
       }
     } catch (requestError) {
@@ -176,11 +171,7 @@ export default function LoginPage({ onAuthenticated, onStaffAuthenticated }) {
 
       <form className="space-y-5 lg:space-y-3" onSubmit={handleSubmit}>
         {access === 'patient' ? <>
-          <div className="grid grid-cols-2 rounded-2xl border border-brand/10 bg-mint/45 p-1" aria-label="Choose patient login method">
-            {[['details', 'Name + Patient ID'], ['mobile', 'Mobile number']].map(([value, label]) => <button className={`rounded-xl px-3 py-2 text-xs font-extrabold transition ${patientLoginMethod === value ? 'bg-white text-brand shadow-sm' : 'text-ink/45 hover:text-brand'}`} key={value} type="button" aria-pressed={patientLoginMethod === value} onClick={() => { setPatientLoginMethod(value); setError('') }}>{label}</button>)}
-          </div>
-
-          {patientLoginMethod === 'details' ? <><div>
+          <div>
             <label className="mb-2 block text-sm font-extrabold" htmlFor="fullName">
               Full name as recorded by the clinic
             </label>
@@ -202,7 +193,14 @@ export default function LoginPage({ onAuthenticated, onStaffAuthenticated }) {
             </div>
           </div>
 
-          <div>
+          <div className="grid grid-cols-2 rounded-2xl bg-cream p-1" aria-label="Choose patient login method">
+            {[
+              ['patient_id', 'Patient ID'],
+              ['mobile', 'Mobile number'],
+            ].map(([value, label]) => <button className={`rounded-xl px-3 py-2 text-xs font-extrabold transition ${patientLoginMethod === value ? 'bg-white text-brand shadow-sm' : 'text-ink/45 hover:text-brand'}`} key={value} type="button" aria-pressed={patientLoginMethod === value} onClick={() => { setPatientLoginMethod(value); setError('') }}>{label}</button>)}
+          </div>
+
+          {patientLoginMethod === 'patient_id' ? <div>
             <label className="mb-2 block text-sm font-extrabold" htmlFor="patientNumber">Patient ID</label>
             <div className="relative">
               <IdCard className="absolute left-4 top-1/2 -translate-y-1/2 text-ink/30" size={18} />
@@ -224,13 +222,13 @@ export default function LoginPage({ onAuthenticated, onStaffAuthenticated }) {
             <p className="mt-2 text-xs leading-5 text-ink/45">
               Your patient ID is on the card or instructions given by the clinic.
             </p>
-          </div></> : <div>
-            <label className="mb-2 block text-sm font-extrabold" htmlFor="mobileNumber">Mobile number registered with the clinic</label>
+          </div> : <div>
+            <label className="mb-2 block text-sm font-extrabold" htmlFor="mobileNumber">Mobile number recorded by the clinic</label>
             <div className="relative">
               <Phone className="absolute left-4 top-1/2 -translate-y-1/2 text-ink/30" size={18} />
-              <input id="mobileNumber" name="mobileNumber" type="tel" autoComplete="tel" inputMode="tel" className="input-field" placeholder="09XX XXX XXXX" value={mobileNumber} onChange={(event) => setMobileNumber(event.target.value)} disabled={submitting} required />
+              <input id="mobileNumber" name="mobileNumber" className="input-field" type="tel" autoComplete="tel" placeholder="0917 123 4567" value={mobileNumber} onChange={(event) => setMobileNumber(event.target.value)} disabled={submitting} required />
             </div>
-            <p className="mt-2 text-xs leading-5 text-ink/45">Use the exact Philippine mobile number saved by reception.</p>
+            <p className="mt-2 text-xs leading-5 text-ink/45">Use the Philippine mobile number saved in your patient profile.</p>
           </div>}
         </> : <>
           <div>
@@ -290,9 +288,7 @@ export default function LoginPage({ onAuthenticated, onStaffAuthenticated }) {
         <p className="text-xs leading-5 text-ink/60">
           {access === 'staff'
             ? 'Use only your own staff account. All patient access and appointment changes are recorded.'
-            : patientLoginMethod === 'mobile'
-              ? 'Only the unique mobile number registered on your patient account can be used.'
-              : 'Use the exact full name and patient ID recorded by the clinic.'}
+            : `Use the exact full name and ${patientLoginMethod === 'patient_id' ? 'patient ID' : 'mobile number'} recorded by the clinic.`}
         </p>
       </div>
 
