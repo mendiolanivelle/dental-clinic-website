@@ -757,6 +757,13 @@ test('reception staff use a separate protected session and can confirm booking r
     assert.equal(me.json().staff.displayName, 'Rina Reception')
     assert.equal((await staffApp.inject({ url: '/api/staff/me' })).statusCode, 401)
 
+    const allPatients = await staffApp.inject({
+      url: '/api/staff/patients?q=',
+      headers: { cookie },
+    })
+    assert.equal(allPatients.statusCode, 200)
+    assert.equal(allPatients.json().patients.length, 1)
+
     const patients = await staffApp.inject({
       url: '/api/staff/patients?q=Patricia',
       headers: { cookie },

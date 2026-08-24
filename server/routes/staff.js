@@ -380,7 +380,7 @@ export default async function staffRoutes(
           type: 'object',
           additionalProperties: false,
           required: ['q'],
-          properties: { q: { type: 'string', minLength: 2, maxLength: 100 } },
+          properties: { q: { type: 'string', maxLength: 100 } },
         },
       },
     },

@@ -812,13 +812,11 @@ export function createStore(db) {
       const result = await db.query(
         `SELECT id, display_name, patient_number, phone_e164, age, gender
          FROM patients
-         WHERE portal_enabled = true
-           AND (
+         WHERE (
              position(lower($1) in lower(display_name)) > 0
              OR position(upper($1) in patient_number) > 0
            )
-         ORDER BY display_name ASC
-         LIMIT 20`,
+         ORDER BY display_name ASC`,
         [query],
       )
       return result.rows.map((row) => ({

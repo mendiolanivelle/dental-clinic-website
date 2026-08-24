@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Check, Copy, IdCard, Phone, Search, UserPlus, UsersRound } from 'lucide-react'
 import { api } from '../api'
 import { EmptyState } from '../components/PageState'
@@ -19,16 +19,11 @@ export default function ReceptionPatientsPage() {
   const [createdPatient, setCreatedPatient] = useState(null)
   const [copied, setCopied] = useState(false)
 
-  async function search(event) {
-    event.preventDefault()
-    if (query.trim().length < 2) {
-      setError('Enter at least two letters or numbers.')
-      return
-    }
+  const loadPatients = useCallback(async (searchQuery = '') => {
     setLoading(true)
     setError('')
     try {
-      const data = await api.searchReceptionPatients(query.trim())
+      const data = await api.searchReceptionPatients(searchQuery)
       setPatients(data.patients || [])
       setSearched(true)
       setCreatedPatient(null)
@@ -38,6 +33,13 @@ export default function ReceptionPatientsPage() {
     } finally {
       setLoading(false)
     }
+  }, [])
+
+  useEffect(() => { loadPatients() }, [loadPatients])
+
+  async function search(event) {
+    event.preventDefault()
+    await loadPatients(query.trim())
   }
 
   async function createPatient(event) {
@@ -52,7 +54,8 @@ export default function ReceptionPatientsPage() {
         gender: createGender,
       })
       setCreatedPatient(data.patient)
-      setPatients([data.patient])
+      setPatients((current) => [...current.filter(({ id }) => id !== data.patient.id), data.patient]
+        .sort((a, b) => a.displayName.localeCompare(b.displayName)))
       setSearched(true)
       setShowCreate(false)
       setQuery(data.patient.displayName)
@@ -73,8 +76,8 @@ export default function ReceptionPatientsPage() {
   return <>
     <div className="mb-8">
       <p className="text-xs font-extrabold uppercase tracking-[.18em] text-brand/60">Directory</p>
-      <h1 className="mt-2 text-3xl font-extrabold tracking-tight">Find a patient</h1>
-      <p className="mt-2 text-sm text-ink/50">Search by patient name or patient ID. Clinical records are not shown here.</p>
+      <h1 className="mt-2 text-3xl font-extrabold tracking-tight">Registered patients</h1>
+      <p className="mt-2 text-sm text-ink/50">All registered patients are listed below. Search by name or patient ID to narrow the list.</p>
     </div>
     <form className="flex flex-col gap-3 rounded-3xl bg-white p-5 soft-shadow sm:flex-row" onSubmit={search}>
       <div className="relative flex-1">
@@ -138,7 +141,9 @@ export default function ReceptionPatientsPage() {
       </div>
     )}
     <div className="mt-6">
-      {searched && !patients.length ? <EmptyState
+      {!loading && patients.length > 0 && <p className="mb-3 text-xs font-extrabold uppercase tracking-[.14em] text-ink/40">{patients.length} patient{patients.length === 1 ? '' : 's'}</p>}
+      {loading ? <p className="rounded-3xl bg-white p-8 text-center text-sm font-semibold text-ink/45">Loading patients…</p> :
+      searched && !patients.length ? <EmptyState
         icon={UsersRound}
         title="No patient found"
         message="Check the spelling or create a new patient account for this person."
