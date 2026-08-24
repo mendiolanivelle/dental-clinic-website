@@ -241,6 +241,12 @@ export default async function staffRoutes(
     },
   )
 
+  app.get('/api/staff/dentists', { preHandler: requireReception }, async (request) => {
+    const dentists = await store.listActiveDentists()
+    await audit(request, 'staff.dentists_listed')
+    return { dentists }
+  })
+
   app.patch(
     '/api/staff/appointments/:id/schedule',
     {
@@ -250,14 +256,18 @@ export default async function staffRoutes(
         body: {
           type: 'object',
           additionalProperties: false,
-          required: ['startsAt'],
-          properties: { startsAt: { type: 'string', format: 'date-time' } },
+          required: ['startsAt', 'dentistId'],
+          properties: {
+            startsAt: { type: 'string', format: 'date-time' },
+            dentistId: { type: 'string', format: 'uuid' },
+          },
         },
       },
     },
     async (request, reply) => {
       const result = await store.rescheduleReceptionAppointment({
         id: request.params.id,
+        dentistId: request.body.dentistId,
         startsAt: request.body.startsAt,
         now: now(),
       })

@@ -41,11 +41,12 @@ const dayItems = (day) => [
   })),
 ].sort((a, b) => String(a.time).localeCompare(String(b.time)))
 
-function BookingDetails({ booking, close, onRescheduled }) {
+function BookingDetails({ booking, close, dentists, onRescheduled }) {
   const initialSchedule = manilaDateTime(booking.time)
   const [editing, setEditing] = useState(false)
   const [date, setDate] = useState(initialSchedule.date)
   const [time, setTime] = useState(initialSchedule.time)
+  const [dentistId, setDentistId] = useState(booking.dentistId)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   useEffect(() => {
@@ -67,7 +68,10 @@ function BookingDetails({ booking, close, onRescheduled }) {
     setBusy(true)
     setError('')
     try {
-      await api.rescheduleReceptionAppointment(booking.id, new Date(`${date}T${time}:00+08:00`).toISOString())
+      await api.rescheduleReceptionAppointment(booking.id, {
+        startsAt: new Date(`${date}T${time}:00+08:00`).toISOString(),
+        dentistId,
+      })
       await onRescheduled()
     } catch (requestError) {
       setError(requestError.message || 'The appointment could not be rescheduled.')
@@ -106,7 +110,12 @@ function BookingDetails({ booking, close, onRescheduled }) {
       {canReschedule && !editing && <button className="mt-6 inline-flex items-center gap-2 rounded-xl bg-brand px-4 py-2.5 text-sm font-extrabold text-white hover:bg-brand-dark" type="button" onClick={() => setEditing(true)}><CalendarClock size={17} /> Change schedule</button>}
       {editing && <form className="mt-6 rounded-2xl bg-cream/70 p-4" onSubmit={submitReschedule}>
         <p className="text-sm font-extrabold">Choose a new one-hour schedule</p>
-        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+        <div className="mt-4 grid gap-4 sm:grid-cols-3">
+          <label className="text-xs font-extrabold text-ink/55">Dentist
+            <select className="mt-2 w-full rounded-xl border border-ink/10 bg-white px-3 py-2.5 text-sm font-semibold text-ink" required value={dentistId} onChange={(event) => setDentistId(event.target.value)}>
+              {dentists.map((dentist) => <option key={dentist.id} value={dentist.id}>{dentist.displayName}</option>)}
+            </select>
+          </label>
           <label className="text-xs font-extrabold text-ink/55">Date
             <input className="mt-2 w-full rounded-xl border border-ink/10 bg-white px-3 py-2.5 text-sm font-semibold text-ink" type="date" min={manilaToday()} required value={date} onChange={(event) => setDate(event.target.value)} />
           </label>
@@ -118,7 +127,7 @@ function BookingDetails({ booking, close, onRescheduled }) {
         </div>
         {error && <p className="mt-3 rounded-xl bg-[#fff0e7] p-3 text-sm text-[#914b22]" role="alert">{error}</p>}
         <div className="mt-4 flex gap-2">
-          <button className="rounded-xl bg-brand px-4 py-2.5 text-xs font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-50" disabled={busy || (date === initialSchedule.date && time === initialSchedule.time)} type="submit">{busy ? 'Saving…' : 'Save new schedule'}</button>
+          <button className="rounded-xl bg-brand px-4 py-2.5 text-xs font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-50" disabled={busy || (dentistId === booking.dentistId && date === initialSchedule.date && time === initialSchedule.time)} type="submit">{busy ? 'Saving…' : 'Save new schedule'}</button>
           <button className="rounded-xl px-4 py-2.5 text-xs font-extrabold text-ink/50" disabled={busy} type="button" onClick={() => { setEditing(false); setError('') }}>Cancel</button>
         </div>
       </form>}
@@ -131,20 +140,24 @@ export default function ReceptionCalendarPage() {
   const [weekStart, setWeekStart] = useState(() => calendarWeek(today)[0])
   const [selected, setSelected] = useState(null)
   const [message, setMessage] = useState('')
-  const [state, setState] = useState({ loading: true, days: [], error: null })
+  const [state, setState] = useState({ loading: true, days: [], dentists: [], error: null })
 
   const load = useCallback(async () => {
-    setState({ loading: true, days: [], error: null })
+    setState({ loading: true, days: [], dentists: [], error: null })
     try {
       const dates = calendarWeek(weekStart)
-      const calendars = await Promise.all(dates.map((date) => api.getReceptionCalendar(date)))
+      const [calendars, dentistData] = await Promise.all([
+        Promise.all(dates.map((date) => api.getReceptionCalendar(date))),
+        api.getReceptionDentists(),
+      ])
       setState({
         loading: false,
         error: null,
+        dentists: dentistData.dentists || [],
         days: calendars.map((calendar, index) => ({ date: dates[index], items: dayItems(calendar) })),
       })
     } catch (error) {
-      setState({ loading: false, days: [], error })
+      setState({ loading: false, days: [], dentists: [], error })
     }
   }, [weekStart])
   useEffect(() => { load() }, [load])
@@ -194,6 +207,6 @@ export default function ReceptionCalendarPage() {
           </section>)}
         </div>}
 
-    {selected && <BookingDetails booking={selected} close={() => setSelected(null)} onRescheduled={async () => { setSelected(null); setMessage('Appointment schedule updated.'); await load() }} />}
+    {selected && <BookingDetails booking={selected} close={() => setSelected(null)} dentists={state.dentists} onRescheduled={async () => { setSelected(null); setMessage('Appointment schedule and dentist updated.'); await load() }} />}
   </>
 }

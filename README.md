@@ -115,8 +115,9 @@ only to verify staff email/password credentials.
 Appointment requests are intentionally not automatic confirmations. The
 calendar uses active dentists and hides conflicts with scheduled, confirmed,
 or already-requested visits. The initial clinic schedule is Monday–Saturday,
-9:00 AM–5:00 PM Manila time, in one-hour slots. Reception can reschedule an
-active appointment from its calendar details; occupied or invalid slots are rejected.
+9:00 AM–5:00 PM Manila time, in one-hour slots. Reception can change the dentist,
+date, and time from an active appointment's calendar details; occupied or invalid
+slots are rejected.
 
 ## Verification
 

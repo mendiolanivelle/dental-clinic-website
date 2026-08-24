@@ -82,6 +82,7 @@ const receptionAppointmentFromRow = (row) => ({
   startsAt: row.starts_at,
   endsAt: row.ends_at,
   status: row.status,
+  dentistId: row.dentist_id,
   dentistName: row.dentist_name,
   patient: {
     id: row.patient_id,
@@ -569,7 +570,7 @@ export function createStore(db) {
       const [appointments, requests] = await Promise.all([
         db.query(
           `SELECT a.id, t.name AS type_name, a.starts_at, a.ends_at, a.status,
-                  d.display_name AS dentist_name, p.id AS patient_id,
+                  d.id AS dentist_id, d.display_name AS dentist_name, p.id AS patient_id,
                   p.display_name AS patient_name, p.patient_number, p.phone_e164
            FROM appointments a
            JOIN appointment_types t ON t.id = a.appointment_type_id
@@ -602,6 +603,16 @@ export function createStore(db) {
         appointments: appointments.rows.map(receptionAppointmentFromRow),
         appointmentRequests: requests.rows.map(receptionRequestFromRow),
       }
+    },
+
+    async listActiveDentists() {
+      const result = await db.query(
+        `SELECT id, display_name
+         FROM dentists
+         WHERE active = true
+         ORDER BY display_name ASC`,
+      )
+      return result.rows.map((row) => ({ id: row.id, displayName: row.display_name }))
     },
 
     async listReceptionBilling(date) {
@@ -643,7 +654,7 @@ export function createStore(db) {
       }
     },
 
-    async rescheduleReceptionAppointment({ id, startsAt, now }) {
+    async rescheduleReceptionAppointment({ id, dentistId, startsAt, now }) {
       try {
         return await db.transaction(async (client) => {
           const selected = await client.query(
@@ -659,6 +670,7 @@ export function createStore(db) {
             `UPDATE appointments
              SET starts_at = $2::timestamptz,
                  ends_at = $2::timestamptz + interval '1 hour',
+                 dentist_id = $4,
                  updated_at = $3
              WHERE id = $1
                AND $2::timestamptz > $3
@@ -667,6 +679,7 @@ export function createStore(db) {
                AND ($2::timestamptz AT TIME ZONE 'Asia/Manila')::time < time '17:00'
                AND EXTRACT(MINUTE FROM $2::timestamptz AT TIME ZONE 'Asia/Manila') = 0
                AND EXTRACT(SECOND FROM $2::timestamptz AT TIME ZONE 'Asia/Manila') = 0
+               AND EXISTS (SELECT 1 FROM dentists d WHERE d.id = $4 AND d.active = true)
                AND NOT EXISTS (
                  SELECT 1 FROM appointments a
                  WHERE a.id <> $1
@@ -683,27 +696,29 @@ export function createStore(db) {
                    AND r.requested_end_at > $2::timestamptz
                )
              RETURNING id`,
-            [id, startsAt, now, selected.rows[0].dentist_id],
+            [id, startsAt, now, dentistId],
           )
           if (!updated.rowCount) return { outcome: 'slot_unavailable' }
           await client.query(
             `UPDATE appointment_requests
                SET requested_start_at = $1::timestamptz,
                    requested_end_at = $1::timestamptz + interval '1 hour',
+                   dentist_id = $3,
                    preferred_date = ($1::timestamptz AT TIME ZONE 'Asia/Manila')::date,
                    time_preference = CASE
                      WHEN EXTRACT(HOUR FROM $1::timestamptz AT TIME ZONE 'Asia/Manila') < 12
                      THEN 'morning' ELSE 'afternoon'
                    END,
                    updated_at = $2
-               WHERE patient_id = $4
-                 AND dentist_id = $3
-                 AND appointment_type_id = $5
-                 AND requested_start_at = $6
+               WHERE patient_id = $5
+                 AND dentist_id = $4
+                 AND appointment_type_id = $6
+                 AND requested_start_at = $7
                  AND status = 'confirmed'`,
             [
               startsAt,
               now,
+              dentistId,
               selected.rows[0].dentist_id,
               selected.rows[0].patient_id,
               selected.rows[0].appointment_type_id,
