@@ -111,7 +111,7 @@ export default function RecordsPage() {
               <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-mint text-brand"><ReceiptText size={22} /></div>
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2"><h3 className="font-extrabold">{charge.description}</h3><span className="rounded-full bg-cream px-2 py-1 text-[10px] font-extrabold uppercase text-ink/55">{titleCase(charge.status)}</span></div>
-                <p className="mt-1 text-xs text-ink/45">Payment record PAY-{String(charge.recordNumber).padStart(6, '0')}</p>
+                <p className="mt-1 text-xs text-ink/45">{charge.dentistName} · Payment record PAY-{String(charge.recordNumber).padStart(6, '0')}</p>
               </div>
             </div>
             <dl className="mt-5 grid grid-cols-3 gap-3 rounded-2xl bg-cream/65 p-4 text-xs">

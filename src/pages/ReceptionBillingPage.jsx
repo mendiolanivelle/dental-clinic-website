@@ -202,7 +202,7 @@ export default function ReceptionBillingPage() {
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2"><h3 className="font-extrabold">{charge.patient.displayName}</h3><span className="rounded-full bg-cream px-2.5 py-1 text-[10px] font-extrabold uppercase text-ink/55">{titleCase(charge.status)}</span></div>
-              <p className="mt-1 text-sm text-ink/50">{charge.description} · {recordLabel(charge.recordNumber)}</p>
+              <p className="mt-1 text-sm text-ink/50">{charge.description} · {charge.dentistName} · {recordLabel(charge.recordNumber)}</p>
               <p className="mt-2 text-xs text-ink/40">Total {formatCurrency(charge.totalCents)} · Paid {formatCurrency(charge.paidCents)} · Balance <strong>{formatCurrency(charge.balanceCents)}</strong>{charge.invoiceReference ? ` · Invoice ${charge.invoiceReference}` : ''}</p>
             </div>
             {charge.balanceCents > 0 && <button className="rounded-xl border border-brand/15 px-4 py-2.5 text-xs font-extrabold text-brand hover:bg-mint" type="button" onClick={() => { setPayingCharge(charge.id); setAmount((charge.balanceCents / 100).toFixed(2)); setMethod('cash'); setReference(''); setFormError('') }}>Add payment</button>}

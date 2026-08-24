@@ -286,6 +286,7 @@ class MemoryStore {
       totalCents,
       status: input.paymentAmountCents === totalCents ? 'paid' : input.paymentAmountCents ? 'partially_paid' : 'unpaid',
       invoiceReference: input.invoiceReference,
+      dentistName: appointment.dentistName,
       patient: { id: this.patient.id, displayName: this.patient.displayName, patientNumber: this.patient.patientNumber },
       payments: input.paymentAmountCents ? [{
         id: 'b0000000-0000-4000-8000-000000000001',
@@ -814,6 +815,7 @@ test('reception staff use a separate protected session and can confirm booking r
     assert.equal(checkout.statusCode, 201)
     assert.equal(checkout.json().charge.status, 'partially_paid')
     assert.equal(checkout.json().charge.balanceCents, 100000)
+    assert.equal(checkout.json().charge.dentistName, 'Dr. Andrea Sample')
 
     const finalPayment = await staffApp.inject({
       method: 'POST',
