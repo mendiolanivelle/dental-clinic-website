@@ -233,7 +233,7 @@ class MemoryStore {
 
   async listAppointmentRequests(patientId) {
     return this.appointmentRequests
-      .filter((request) => request.patientId === patientId)
+      .filter((request) => request.patientId === patientId && request.status === 'requested')
       .map(({ patientId: _patientId, ...request }) => request)
   }
 
@@ -1021,12 +1021,14 @@ test('patient endpoints require authentication and enforce patient ownership and
   assert.equal(duplicateRequest.statusCode, 409)
   assert.equal(duplicateRequest.json().error.code, 'SLOT_UNAVAILABLE')
 
+  store.appointmentRequests[0].status = 'confirmed'
+
   const requestList = await app.inject({
     url: '/api/me/appointment-requests',
     headers: { cookie },
   })
   assert.equal(requestList.statusCode, 200)
-  assert.equal(requestList.json().appointmentRequests.length, 1)
+  assert.equal(requestList.json().appointmentRequests.length, 0)
 
   const appointments = await app.inject({
     url: '/api/me/appointments?scope=upcoming',

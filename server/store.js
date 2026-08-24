@@ -252,6 +252,7 @@ export function createStore(db) {
     const result = await db.query(
       `${appointmentRequestSelect}
        WHERE r.patient_id = $1
+         AND r.status = 'requested'
        ORDER BY r.created_at DESC
        LIMIT 20`,
       [patientId],
