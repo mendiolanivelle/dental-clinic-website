@@ -278,10 +278,12 @@ class MemoryStore {
     }
   }
 
-  async listReceptionBilling() {
+  async listReceptionBilling(date) {
     return {
       awaitingCheckout: this.appointments
-        .filter(({ status }) => ['scheduled', 'confirmed'].includes(status))
+        .filter(({ status, startsAt }) =>
+          ['scheduled', 'confirmed'].includes(status) &&
+          new Date(new Date(startsAt).getTime() + 8 * 60 * 60_000).toISOString().slice(0, 10) === date)
         .map((appointment) => ({
           ...appointment,
           patient: {
@@ -787,9 +789,20 @@ test('reception staff use a separate protected session and can confirm booking r
     clinicNote: null,
     createdAt: currentTime.toISOString(),
   })
+  staffStore.appointments.push({
+    patientId: staffStore.patient.id,
+    id: '30000000-0000-4000-8000-000000000003',
+    typeName: 'Future cleaning',
+    startsAt: '2030-02-01T02:00:00.000Z',
+    endsAt: '2030-02-01T03:00:00.000Z',
+    status: 'confirmed',
+    dentistId: staffStore.dentist.id,
+    dentistName: staffStore.dentist.displayName,
+  })
   const staffApp = await buildApp({
     config,
     store: staffStore,
+    now: () => new Date('2030-01-01T00:00:00.000Z'),
     staticDir: false,
     logger: false,
     verifyStaffCredentials: async ({ email, password }) =>
@@ -886,6 +899,7 @@ test('reception staff use a separate protected session and can confirm booking r
 
     const billing = await staffApp.inject({ url: '/api/staff/billing', headers: { cookie } })
     assert.equal(billing.statusCode, 200)
+    assert.equal(billing.json().awaitingCheckout.length, 1)
     assert.equal(billing.json().awaitingCheckout[0].id, '30000000-0000-4000-8000-000000000001')
 
     const checkoutWithoutConfirmation = await staffApp.inject({

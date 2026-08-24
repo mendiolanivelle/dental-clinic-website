@@ -616,9 +616,11 @@ export function createStore(db) {
            JOIN patients p ON p.id = a.patient_id
            LEFT JOIN patient_charges c ON c.appointment_id = a.id
            WHERE a.status IN ('scheduled', 'confirmed')
+             AND (a.starts_at AT TIME ZONE 'Asia/Manila')::date = $1::date
              AND c.id IS NULL
            ORDER BY a.starts_at ASC
            LIMIT 100`,
+          [date],
         ),
         loadCharges(db, 'true', [], true),
         db.query(

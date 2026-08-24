@@ -166,8 +166,8 @@ export default function ReceptionBillingPage() {
     </section>
 
     <section className="mb-10" aria-labelledby="checkout-heading">
-      <h2 id="checkout-heading" className="text-xl font-extrabold">Awaiting checkout</h2>
-      <p className="mt-1 text-sm text-ink/45">Confirmed appointments appear here until reception records the final charge.</p>
+      <h2 id="checkout-heading" className="text-xl font-extrabold">Today's visits awaiting checkout</h2>
+      <p className="mt-1 text-sm text-ink/45">Only today's confirmed appointments appear here. Future visits stay in the calendar.</p>
       {checkout && <form className="mt-5 rounded-3xl border border-brand/15 bg-mint/55 p-5 sm:p-6" onSubmit={submitCheckout}>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div><p className="text-xs font-extrabold uppercase text-brand/60">Checkout patient</p><h3 className="mt-1 text-lg font-extrabold">{checkout.patient.displayName}</h3></div>
@@ -196,7 +196,7 @@ export default function ReceptionBillingPage() {
           </div>
         </article>)}
       </div>
-      {!awaiting.length && <div className="mt-5"><EmptyState icon={CheckCircle2} title="No visits awaiting checkout" message="Confirmed appointments will appear here for reception." /></div>}
+      {!awaiting.length && <div className="mt-5"><EmptyState icon={CheckCircle2} title="No visits awaiting checkout today" message="Today's confirmed appointments will appear here for reception." /></div>}
     </section>
 
     <section className="mb-10" aria-labelledby="payment-ledger-heading">
