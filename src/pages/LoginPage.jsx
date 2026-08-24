@@ -135,7 +135,7 @@ export default function LoginPage({ onAuthenticated }) {
               type="text"
               autoComplete="name"
               autoCapitalize="words"
-              className="input-field pl-11"
+              className="input-field"
               placeholder="First Middle Last"
               value={fullName}
               onChange={(event) => setFullName(event.target.value)}
@@ -158,7 +158,7 @@ export default function LoginPage({ onAuthenticated }) {
               autoComplete="off"
               autoCapitalize="characters"
               spellCheck="false"
-              className="input-field pl-11 uppercase"
+              className="input-field uppercase"
               placeholder="PT-7K4N9Q"
               value={patientNumber}
               onChange={(event) => setPatientNumber(event.target.value)}

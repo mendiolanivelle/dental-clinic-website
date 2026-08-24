@@ -20,7 +20,7 @@ button:not(:disabled), a { cursor: pointer; }
   border: 1px solid rgba(23, 60, 58, 0.1);
   border-radius: 1rem;
   background: #fdfcf9;
-  padding: 0.875rem 1rem;
+  padding: 0.875rem 1rem 0.875rem 2.75rem;
   color: #173c3a;
   font-size: 0.875rem;
   outline: none;
@@ -39,11 +39,30 @@ button:not(:disabled), a { cursor: pointer; }
 .card-hover { transition: transform .2s ease, box-shadow .2s ease; }
 .card-hover:hover { transform: translateY(-3px); box-shadow: 0 18px 44px rgba(23, 60, 58, 0.11); }
 
-.services-cta { animation: services-cta-pulse 2.6s ease-in-out infinite; }
-.services-cta:hover, .services-cta:focus-visible { animation-play-state: paused; }
+.services-cta {
+  isolation: isolate;
+  animation: services-cta-pulse 2.6s ease-in-out infinite;
+}
+.services-cta::after {
+  position: absolute;
+  z-index: -1;
+  content: "";
+  inset: -5px;
+  border: 2px solid currentColor;
+  border-radius: inherit;
+  pointer-events: none;
+  animation: services-cta-ring 2.6s ease-out infinite;
+}
+.services-cta:hover, .services-cta:focus-visible,
+.services-cta:hover::after, .services-cta:focus-visible::after { animation-play-state: paused; }
 @keyframes services-cta-pulse {
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(-3px); }
+}
+@keyframes services-cta-ring {
+  0%, 20% { opacity: 0; transform: scale(.96); }
+  45% { opacity: .45; }
+  80%, 100% { opacity: 0; transform: scale(1.08); }
 }
 
 :where(a, button, input):focus-visible {
@@ -52,5 +71,5 @@ button:not(:disabled), a { cursor: pointer; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
+  *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
 }
