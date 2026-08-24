@@ -120,7 +120,7 @@ export default function DashboardPage() {
       </section>
 
       <section className="mb-8 rounded-3xl bg-white p-5 sm:p-6" aria-labelledby="services-heading">
-        <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="mb-5">
           <div>
             <p className="text-xs font-extrabold uppercase tracking-[.18em] text-brand/60">Plan your next visit</p>
             <h2 id="services-heading" className="mt-1 text-xl font-extrabold">Choose a dental service</h2>
@@ -128,9 +128,6 @@ export default function DashboardPage() {
               Select the care you need and request a convenient appointment time. The clinic will confirm availability with you.
             </p>
           </div>
-          <Link className="inline-flex shrink-0 items-center gap-1 text-xs font-extrabold text-brand" to="/portal/appointments">
-            View booking requests <ChevronRight size={15} />
-          </Link>
         </div>
 
         {services.length ? (
