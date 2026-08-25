@@ -103,6 +103,24 @@ function AppointmentCard({ value, upcoming }) {
   )
 }
 
+function FollowUpCard({ value }) {
+  return (
+    <article className="rounded-3xl border border-brand/10 bg-mint/45 p-5 sm:p-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+        <div className="grid h-16 w-16 shrink-0 place-items-center rounded-2xl bg-brand text-white"><CalendarClock size={26} /></div>
+        <div className="min-w-0 flex-1">
+          <p className="text-[10px] font-extrabold uppercase tracking-[.14em] text-brand/60">Dentist-recommended follow-up</p>
+          <h3 className="mt-1 text-lg font-extrabold">{value.serviceName || 'Follow-up visit'}</h3>
+          <p className="mt-3 text-sm font-semibold text-ink/55">Recommended for {formatDate(value.recommendedOn)} · {value.dentistName}</p>
+          {value.notes && <p className="mt-3 text-xs leading-5 text-ink/60">{value.notes}</p>}
+          <p className="mt-3 text-xs font-bold text-brand/70">Exact time to be confirmed by reception.</p>
+        </div>
+        <ClinicPhoneLink className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-brand/15 bg-white px-4 py-2.5 text-xs font-extrabold text-brand"><Phone size={14} />Arrange visit</ClinicPhoneLink>
+      </div>
+    </article>
+  )
+}
+
 function BookingRequestForm({ services, selectedServiceId, onServiceChange, onCreated }) {
   const [preferredDate, setPreferredDate] = useState('')
   const [slots, setSlots] = useState([])
@@ -313,6 +331,7 @@ function AppointmentRequestCard({ value }) {
 export default function AppointmentsPage() {
   const [searchParams] = useSearchParams()
   const [upcoming, setUpcoming] = useState([])
+  const [followUps, setFollowUps] = useState([])
   const [past, setPast] = useState([])
   const [services, setServices] = useState([])
   const [appointmentRequests, setAppointmentRequests] = useState([])
@@ -331,6 +350,7 @@ export default function AppointmentsPage() {
         api.getAppointmentRequests(),
       ])
       setUpcoming(appointmentsFrom(upcomingPayload, 'upcoming'))
+      setFollowUps(listFrom(upcomingPayload, 'followUps'))
       setPast(appointmentsFrom(pastPayload, 'past'))
       setServices(listFrom(servicesPayload, 'services').map(serviceView))
       setAppointmentRequests(listFrom(requestPayload, 'appointmentRequests').map(appointmentRequestView))
@@ -393,14 +413,15 @@ export default function AppointmentsPage() {
               </div>
               <div>
                 <h2 id="upcoming-heading" className="text-xl font-extrabold">Upcoming</h2>
-                <p className="text-xs text-ink/45">{upcoming.length} scheduled visit{upcoming.length === 1 ? '' : 's'}</p>
+                <p className="text-xs text-ink/45">{upcoming.length} scheduled visit{upcoming.length === 1 ? '' : 's'}{followUps.length ? ` · ${followUps.length} recommended follow-up${followUps.length === 1 ? '' : 's'}` : ''}</p>
               </div>
             </div>
-            {upcoming.length ? (
+            {(upcoming.length || followUps.length) ? (
               <div className="space-y-4">
                 {upcoming.map((appointment) => (
                   <AppointmentCard key={appointment.id} value={appointment} upcoming />
                 ))}
+                {followUps.map((followUp) => <FollowUpCard key={`follow-up-${followUp.id}`} value={followUp} />)}
               </div>
             ) : (
               <EmptyState

@@ -185,13 +185,14 @@ export default async function patientRoutes(app, { store, config, now, prescript
       },
     },
     async (request) => {
-      const appointments = await store.listAppointments(
-        request.patient.id,
-        request.query.scope,
-        now(),
-      )
+      const [appointments, followUps] = await Promise.all([
+        store.listAppointments(request.patient.id, request.query.scope, now()),
+        request.query.scope === 'upcoming'
+          ? store.listPatientFollowUps(request.patient.id)
+          : Promise.resolve([]),
+      ])
       await audited(request, 'portal.appointments_listed')
-      return { appointments }
+      return { appointments, followUps: followUps.filter(({ status }) => status === 'pending') }
     },
   )
 

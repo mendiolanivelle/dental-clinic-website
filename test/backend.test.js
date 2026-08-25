@@ -1718,6 +1718,15 @@ test('patient endpoints require authentication and enforce patient ownership and
   assert.equal(duplicateRequest.json().error.code, 'SLOT_UNAVAILABLE')
 
   store.appointmentRequests[0].status = 'confirmed'
+  store.followUps.push({
+    id: '94000000-0000-4000-8000-000000000001',
+    patientId: store.patient.id,
+    dentistName: store.dentist.displayName,
+    serviceName: 'Cleaning',
+    recommendedOn: '2030-02-01',
+    notes: 'Return for follow-up care.',
+    status: 'pending',
+  })
 
   const requestList = await app.inject({
     url: '/api/me/appointment-requests',
@@ -1734,6 +1743,7 @@ test('patient endpoints require authentication and enforce patient ownership and
     appointments.json().appointments.map(({ id }) => id),
     ['30000000-0000-4000-8000-000000000001'],
   )
+  assert.deepEqual(appointments.json().followUps.map(({ id }) => id), ['94000000-0000-4000-8000-000000000001'])
   assert.equal(appointments.headers['cache-control'], 'no-store')
 
   const pastAppointments = await app.inject({
