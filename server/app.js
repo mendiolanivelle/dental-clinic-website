@@ -18,6 +18,7 @@ import staffRoutes from './routes/staff.js'
 import dentistRoutes from './routes/dentist.js'
 import adminRoutes from './routes/admin.js'
 import { createStaffCredentialVerifier } from './staff-auth.js'
+import { createGoogleDriveStorage } from './google-drive.js'
 
 const defaultStaticDirectory = fileURLToPath(new URL('../dist/', import.meta.url))
 const stateChangingMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
@@ -32,6 +33,7 @@ export async function buildApp({
   staticDir = defaultStaticDirectory,
   logger = config.nodeEnv !== 'test',
   verifyStaffCredentials,
+  prescriptionStorage,
 } = {}) {
   const app = Fastify({
     ajv: {
@@ -62,6 +64,7 @@ export async function buildApp({
     ownedDatabase = db || createDatabase(config)
     store = createStore(ownedDatabase)
   }
+  prescriptionStorage ??= createGoogleDriveStorage(config)
 
   await app.register(cookie)
   await app.register(helmet, {
@@ -157,7 +160,7 @@ export async function buildApp({
     randomBytes: randomBytesFn,
     randomUUID: randomUUIDFn,
   })
-  await app.register(patientRoutes, { store, config, now })
+  await app.register(patientRoutes, { store, config, now, prescriptionStorage })
   await app.register(staffRoutes, {
     store,
     config,
@@ -167,7 +170,7 @@ export async function buildApp({
     verifyStaffCredentials:
       verifyStaffCredentials || createStaffCredentialVerifier(config),
   })
-  await app.register(dentistRoutes, { store, config, now })
+  await app.register(dentistRoutes, { store, config, now, prescriptionStorage })
   await app.register(adminRoutes, {
     store,
     config,

@@ -14,6 +14,12 @@ const productionEnv = (databaseUrl) => ({
   PUBLIC_ORIGIN: 'https://dental.test',
   DATABASE_URL: databaseUrl,
   SESSION_PEPPER: 'a'.repeat(64),
+  GOOGLE_DRIVE_PRESCRIPTIONS_FOLDER_ID: 'test-folder',
+  GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64: Buffer.from(JSON.stringify({
+    client_email: 'test@example.iam.gserviceaccount.com',
+    private_key: 'test-private-key',
+    token_uri: 'https://oauth2.googleapis.com/token',
+  })).toString('base64'),
 })
 
 test('Supabase database options pin its CA, strip URL SSL overrides, and set the private search path', () => {

@@ -1190,21 +1190,27 @@ export function createStore(db) {
         )
         if (!selected.rowCount) return { outcome: 'not_found' }
 
+        if (followUp?.appointmentTypeId) {
+          const service = await client.query('SELECT 1 FROM appointment_types WHERE id = $1', [followUp.appointmentTypeId])
+          if (!service.rowCount) return { outcome: 'invalid_service' }
+        }
+
         let prescriptionId = null
         if (prescription) {
           const inserted = await client.query(
             `INSERT INTO prescriptions (
                patient_id, dentist_id, appointment_id, created_by_staff_id,
                prescribed_on, generic_name, instructions, image_mime_type,
-               image_original_name, image_byte_size, image_sha256, image_bytes, created_at
-             ) VALUES ($1, $2, $3, $4, $5::date, $6, $7, $8, $9, $10, $11, $12, $13)
+               image_original_name, image_byte_size, image_sha256, image_bytes,
+               google_drive_file_id, created_at
+             ) VALUES ($1, $2, $3, $4, $5::date, $6, $7, $8, $9, $10, $11, $12, $13, $14)
              RETURNING id`,
             [
               patientId, dentistId, appointmentId, staffId,
               prescription.prescribedOn, prescription.genericName, prescription.instructions,
               prescription.imageMimeType, prescription.imageOriginalName,
-              prescription.imageBytes.length, prescription.imageSha256,
-              prescription.imageBytes, now,
+              prescription.imageByteSize, prescription.imageSha256,
+              prescription.imageBytes, prescription.driveFileId || null, now,
             ],
           )
           prescriptionId = inserted.rows[0].id
@@ -1212,10 +1218,6 @@ export function createStore(db) {
 
         let followUpId = null
         if (followUp) {
-          if (followUp.appointmentTypeId) {
-            const service = await client.query('SELECT 1 FROM appointment_types WHERE id = $1', [followUp.appointmentTypeId])
-            if (!service.rowCount) return { outcome: 'invalid_service' }
-          }
           const inserted = await client.query(
             `INSERT INTO follow_up_recommendations (
                patient_id, dentist_id, appointment_type_id, created_by_staff_id,
@@ -1250,6 +1252,8 @@ export function createStore(db) {
       imageMimeType,
       imageOriginalName,
       imageBytes,
+      imageByteSize,
+      driveFileId,
       imageSha256,
       now,
     }) {
@@ -1257,9 +1261,9 @@ export function createStore(db) {
         `INSERT INTO prescriptions (
            patient_id, dentist_id, created_by_staff_id, prescribed_on,
            generic_name, instructions, image_mime_type, image_original_name,
-           image_byte_size, image_sha256, image_bytes, created_at
+           image_byte_size, image_sha256, image_bytes, google_drive_file_id, created_at
          )
-         SELECT p.id, $1, $2, $4::date, $5, $6, $7, $8, $9, $10, $11, $12
+         SELECT p.id, $1, $2, $4::date, $5, $6, $7, $8, $9, $10, $11, $12, $13
          FROM patients p
          WHERE p.id = $3
            AND (
@@ -1278,9 +1282,10 @@ export function createStore(db) {
           instructions,
           imageMimeType,
           imageOriginalName,
-          imageBytes.length,
+          imageByteSize,
           imageSha256,
           imageBytes,
+          driveFileId || null,
           now,
         ],
       )
@@ -1289,7 +1294,8 @@ export function createStore(db) {
 
     async getDentistPrescriptionImage(dentistId, prescriptionId) {
       const result = await db.query(
-        `SELECT rx.image_mime_type, rx.image_original_name, rx.image_bytes
+        `SELECT rx.image_mime_type, rx.image_original_name, rx.image_bytes,
+                rx.google_drive_file_id
          FROM prescriptions rx
          WHERE rx.id = $2
            AND (
@@ -1304,12 +1310,13 @@ export function createStore(db) {
         mimeType: result.rows[0].image_mime_type,
         originalName: result.rows[0].image_original_name,
         bytes: result.rows[0].image_bytes,
+        driveFileId: result.rows[0].google_drive_file_id,
       }
     },
 
     async getPatientPrescriptionImage(patientId, prescriptionId) {
       const result = await db.query(
-        `SELECT image_mime_type, image_original_name, image_bytes
+        `SELECT image_mime_type, image_original_name, image_bytes, google_drive_file_id
          FROM prescriptions
          WHERE id = $2 AND patient_id = $1`,
         [patientId, prescriptionId],
@@ -1319,6 +1326,7 @@ export function createStore(db) {
         mimeType: result.rows[0].image_mime_type,
         originalName: result.rows[0].image_original_name,
         bytes: result.rows[0].image_bytes,
+        driveFileId: result.rows[0].google_drive_file_id,
       }
     },
 

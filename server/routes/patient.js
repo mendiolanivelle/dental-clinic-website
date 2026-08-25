@@ -37,7 +37,7 @@ const availabilityQuery = {
 
 const manilaDate = (date) => new Date(date.getTime() + 8 * 60 * 60_000).toISOString().slice(0, 10)
 
-export default async function patientRoutes(app, { store, config, now }) {
+export default async function patientRoutes(app, { store, config, now, prescriptionStorage }) {
   const audited = async (request, action, objectType = null, objectId = null) => {
     await store.addAudit({
       actorType: 'patient',
@@ -222,11 +222,14 @@ export default async function patientRoutes(app, { store, config, now }) {
     async (request, reply) => {
       const image = await store.getPatientPrescriptionImage(request.patient.id, request.params.id)
       if (!image) return reply.code(404).send(notFound)
+      const bytes = image.driveFileId
+        ? await prescriptionStorage.download(image.driveFileId)
+        : image.bytes
       await audited(request, 'portal.prescription_image_viewed', 'prescription', request.params.id)
       return reply
         .type(image.mimeType)
         .header('content-disposition', `inline; filename="${image.originalName}"`)
-        .send(image.bytes)
+        .send(bytes)
     },
   )
 

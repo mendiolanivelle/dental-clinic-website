@@ -38,7 +38,7 @@ const decodeImage = ({ imageBase64, imageMimeType, imageOriginalName }) => {
   return { bytes, originalName }
 }
 
-export default async function dentistRoutes(app, { store, config, now }) {
+export default async function dentistRoutes(app, { store, config, now, prescriptionStorage }) {
   const requireDentist = async (request, reply) => {
     await app.authenticateStaff(request, reply)
     if (reply.sent) return
@@ -66,6 +66,19 @@ export default async function dentistRoutes(app, { store, config, now }) {
       ipDigest: ipDigest(config.sessionPepper, request.ip),
       userAgent: request.headers['user-agent'],
     })
+  }
+
+  const placeImage = async (prescription) => {
+    if (!prescription || !prescriptionStorage) return prescription
+    const driveFileId = await prescriptionStorage.upload({
+      bytes: prescription.imageBytes,
+      mimeType: prescription.imageMimeType,
+    })
+    return { ...prescription, driveFileId, imageBytes: null }
+  }
+
+  const cleanupImage = async (prescription) => {
+    if (prescription?.driveFileId) await prescriptionStorage.remove(prescription.driveFileId)
   }
 
   app.get('/api/dentist/dashboard', { preHandler: requireDentist }, async (request) => {
@@ -176,6 +189,7 @@ export default async function dentistRoutes(app, { store, config, now }) {
           imageMimeType: request.body.prescription.imageMimeType,
           imageOriginalName: image.originalName,
           imageBytes: image.bytes,
+          imageByteSize: image.bytes.length,
           imageSha256: sha256(image.bytes),
         }
       }
@@ -192,23 +206,32 @@ export default async function dentistRoutes(app, { store, config, now }) {
           error: { code: 'INVALID_DATE', message: 'Choose today or a future follow-up date.' },
         })
       }
+      prescription = await placeImage(prescription)
 
-      const result = await store.completeDentistVisit({
-        appointmentId: request.params.appointmentId,
-        patientId: request.params.id,
-        dentistId: request.staff.dentistId,
-        staffId: request.staff.id,
-        proposedFeeCents: request.body.proposedFeeCents,
-        prescription,
-        followUp,
-        now: now(),
-      })
+      let result
+      try {
+        result = await store.completeDentistVisit({
+          appointmentId: request.params.appointmentId,
+          patientId: request.params.id,
+          dentistId: request.staff.dentistId,
+          staffId: request.staff.id,
+          proposedFeeCents: request.body.proposedFeeCents,
+          prescription,
+          followUp,
+          now: now(),
+        })
+      } catch (error) {
+        await cleanupImage(prescription)
+        throw error
+      }
       if (result.outcome === 'not_found') {
+        await cleanupImage(prescription)
         return reply.code(409).send({
           error: { code: 'VISIT_NOT_READY', message: 'This visit is already done or is not ready to finish.' },
         })
       }
       if (result.outcome === 'invalid_service') {
+        await cleanupImage(prescription)
         return reply.code(400).send({
           error: { code: 'INVALID_SERVICE', message: 'Choose a valid follow-up service.' },
         })
@@ -247,20 +270,33 @@ export default async function dentistRoutes(app, { store, config, now }) {
           error: { code: 'INVALID_PRESCRIPTION_IMAGE', message: 'Upload a valid JPEG, PNG, or WebP image up to 2 MB.' },
         })
       }
-      const id = await store.createDentistPrescription({
-        dentistId: request.staff.dentistId,
-        staffId: request.staff.id,
-        patientId: request.params.id,
-        prescribedOn: request.body.prescribedOn,
-        genericName: request.body.genericName.trim(),
-        instructions: request.body.instructions.trim(),
+      const placedImage = await placeImage({
         imageMimeType: request.body.imageMimeType,
-        imageOriginalName: image.originalName,
         imageBytes: image.bytes,
-        imageSha256: sha256(image.bytes),
-        now: now(),
       })
+      let id
+      try {
+        id = await store.createDentistPrescription({
+          dentistId: request.staff.dentistId,
+          staffId: request.staff.id,
+          patientId: request.params.id,
+          prescribedOn: request.body.prescribedOn,
+          genericName: request.body.genericName.trim(),
+          instructions: request.body.instructions.trim(),
+          imageMimeType: placedImage.imageMimeType,
+          imageOriginalName: image.originalName,
+          imageBytes: placedImage.imageBytes,
+          imageByteSize: image.bytes.length,
+          driveFileId: placedImage.driveFileId || null,
+          imageSha256: sha256(image.bytes),
+          now: now(),
+        })
+      } catch (error) {
+        await cleanupImage(placedImage)
+        throw error
+      }
       if (!id) {
+        await cleanupImage(placedImage)
         return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'That patient record was not found.' } })
       }
       await audit(request, 'dentist.prescription_uploaded', 'prescription', id)
@@ -276,11 +312,14 @@ export default async function dentistRoutes(app, { store, config, now }) {
       if (!image) {
         return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'That prescription image was not found.' } })
       }
+      const bytes = image.driveFileId
+        ? await prescriptionStorage.download(image.driveFileId)
+        : image.bytes
       await audit(request, 'dentist.prescription_image_viewed', 'prescription', request.params.id)
       return reply
         .type(image.mimeType)
         .header('content-disposition', `inline; filename="${image.originalName}"`)
-        .send(image.bytes)
+        .send(bytes)
     },
   )
 

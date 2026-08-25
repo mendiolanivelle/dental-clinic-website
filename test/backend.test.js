@@ -419,6 +419,8 @@ class MemoryStore {
       imageMimeType: input.imageMimeType,
       imageOriginalName: input.imageOriginalName,
       imageBytes: input.imageBytes,
+      imageByteSize: input.imageByteSize,
+      driveFileId: input.driveFileId,
       dentistName: this.dentist.displayName,
     })
     return id
@@ -427,7 +429,7 @@ class MemoryStore {
   async getDentistPrescriptionImage(dentistId, prescriptionId) {
     const item = this.prescriptions.find(({ id }) => id === prescriptionId)
     if (!item || dentistId !== this.dentist.id) return null
-    return { mimeType: item.imageMimeType, originalName: item.imageOriginalName, bytes: item.imageBytes }
+    return { mimeType: item.imageMimeType, originalName: item.imageOriginalName, bytes: item.imageBytes, driveFileId: item.driveFileId }
   }
 
   async listPatientPrescriptions(patientId) {
@@ -441,7 +443,7 @@ class MemoryStore {
   async getPatientPrescriptionImage(patientId, prescriptionId) {
     const item = this.prescriptions.find(({ id }) => id === prescriptionId)
     if (!item || item.patientId !== patientId) return null
-    return { mimeType: item.imageMimeType, originalName: item.imageOriginalName, bytes: item.imageBytes }
+    return { mimeType: item.imageMimeType, originalName: item.imageOriginalName, bytes: item.imageBytes, driveFileId: item.driveFileId }
   }
 
   async createDentistFollowUp(input) {
@@ -1394,12 +1396,23 @@ test('dentist staff can restore their staff session but cannot use reception end
   dentistStore.staff.dentistId = dentistStore.dentist.id
   dentistStore.staff.displayName = 'Dr. Andrea Sample'
   dentistStore.staff.email = 'dentist@dental.test'
+  const driveFiles = new Map()
+  const prescriptionStorage = {
+    async upload({ bytes }) {
+      const id = `drive-file-${driveFiles.size + 1}`
+      driveFiles.set(id, bytes)
+      return id
+    },
+    async download(id) { return driveFiles.get(id) },
+    async remove(id) { driveFiles.delete(id) },
+  }
   const dentistApp = await buildApp({
     config,
     store: dentistStore,
     now: () => new Date('2030-01-01T00:00:00.000Z'),
     staticDir: false,
     logger: false,
+    prescriptionStorage,
     verifyStaffCredentials: async ({ email, password }) =>
       email === dentistStore.staff.email && password === 'correct-password'
         ? { authUserId: dentistStore.staff.authUserId, email }
@@ -1466,6 +1479,8 @@ test('dentist staff can restore their staff session but cannot use reception end
     })
     assert.equal(uploaded.statusCode, 201, uploaded.body)
     assert.equal(dentistStore.prescriptions[0].imageOriginalName, 'prescription.png')
+    assert.equal(dentistStore.prescriptions[0].imageBytes, null)
+    assert.equal(dentistStore.prescriptions[0].driveFileId, 'drive-file-1')
 
     const prescriptionImage = await dentistApp.inject({
       url: `/api/dentist/prescriptions/${uploaded.json().prescriptionId}/image`,

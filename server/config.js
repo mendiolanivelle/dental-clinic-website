@@ -33,6 +33,21 @@ export function loadConfig(env = process.env) {
   const supabasePublishableKey = env.SUPABASE_PUBLISHABLE_KEY?.trim() || (
     nodeEnv === 'production' ? 'sb_publishable_k8HnlMHTyeyY07HhOSPyPQ_aGHIvuG4' : undefined
   )
+  const googleDrivePrescriptionsFolderId = env.GOOGLE_DRIVE_PRESCRIPTIONS_FOLDER_ID?.trim()
+  const googleDriveCredentialsBase64 = env.GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64?.trim()
+  let googleDriveCredentials
+
+  if (Boolean(googleDrivePrescriptionsFolderId) !== Boolean(googleDriveCredentialsBase64)) {
+    errors.push('Google Drive folder ID and service account credentials must be configured together')
+  }
+  if (googleDriveCredentialsBase64) {
+    try {
+      googleDriveCredentials = JSON.parse(Buffer.from(googleDriveCredentialsBase64, 'base64').toString('utf8'))
+      if (!googleDriveCredentials.client_email || !googleDriveCredentials.private_key || !googleDriveCredentials.token_uri) throw new Error()
+    } catch {
+      errors.push('GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64 must contain valid service account JSON')
+    }
+  }
 
   if (!['development', 'test', 'production'].includes(nodeEnv)) {
     errors.push('NODE_ENV must be development, test, or production')
@@ -95,6 +110,9 @@ export function loadConfig(env = process.env) {
   )
 
   if (nodeEnv === 'production') {
+    if (!googleDrivePrescriptionsFolderId || !googleDriveCredentials) {
+      errors.push('Google Drive prescription storage is required in production')
+    }
     if (databaseUrl) {
       let database
       try {
@@ -145,5 +163,7 @@ export function loadConfig(env = process.env) {
     loginWindowMinutes,
     supabaseUrl,
     supabasePublishableKey,
+    googleDrivePrescriptionsFolderId,
+    googleDriveCredentials,
   })
 }
