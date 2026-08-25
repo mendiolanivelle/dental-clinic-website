@@ -19,13 +19,15 @@ const analyticsQuery = {
   },
 }
 
+const staffPassword = { type: 'string', pattern: '^[0-9]{8,72}$' }
+
 const accountBody = (dentist) => ({
   type: 'object',
   additionalProperties: false,
   required: ['displayName', 'password'],
   properties: {
     displayName: { type: 'string', minLength: 2, maxLength: 160 },
-    password: { type: 'string', minLength: 12, maxLength: 72 },
+    password: staffPassword,
     ...(dentist ? { specialty: { type: 'string', maxLength: 120 } } : {}),
   },
 })
@@ -94,7 +96,7 @@ export default async function adminRoutes(app, { store, config, now, randomBytes
   const createAccount = (role) => async (request, reply) => {
     const displayName = request.body.displayName.trim().replace(/\s+/gu, ' ')
     const normalizedName = normalizeName(displayName)
-    if (!normalizedName || Buffer.byteLength(request.body.password) > 72) {
+    if (!normalizedName) {
       return reply.code(400).send({ error: { code: 'INVALID_REQUEST', message: 'Check the name and password.' } })
     }
     const credentials = await hashStaffPassword(request.body.password, randomBytes)
@@ -144,12 +146,9 @@ export default async function adminRoutes(app, { store, config, now, randomBytes
     preHandler: requireAdmin,
     schema: {
       params: idParams,
-      body: { type: 'object', additionalProperties: false, required: ['password'], properties: { password: { type: 'string', minLength: 12, maxLength: 72 } } },
+      body: { type: 'object', additionalProperties: false, required: ['password'], properties: { password: staffPassword } },
     },
   }, async (request, reply) => {
-    if (Buffer.byteLength(request.body.password) > 72) {
-      return reply.code(400).send({ error: { code: 'INVALID_REQUEST', message: 'The password is too long.' } })
-    }
     const credentials = await hashStaffPassword(request.body.password, randomBytes)
     const changed = await store.resetAdminStaffPassword(request.params.id, credentials, now())
     if (!changed) return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'That staff account was not found.' } })

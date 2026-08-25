@@ -1625,10 +1625,17 @@ test('super admins alone can view aggregate analytics and provision staff withou
     })
     assert.equal(weakPassword.statusCode, 400)
 
+    const nonNumericPassword = await adminApp.inject({
+      method: 'POST', url: '/api/admin/team/receptionists',
+      headers: { origin: config.publicOrigin, cookie },
+      payload: { displayName: 'New Reception', password: 'abcd1234' },
+    })
+    assert.equal(nonNumericPassword.statusCode, 400)
+
     const created = await adminApp.inject({
       method: 'POST', url: '/api/admin/team/receptionists',
       headers: { origin: config.publicOrigin, cookie },
-      payload: { displayName: 'New Reception', password: 'temporary-123' },
+      payload: { displayName: 'New Reception', password: '12345678' },
     })
     assert.equal(created.statusCode, 201)
     assert.equal(created.json().staff.role, 'receptionist')
