@@ -36,7 +36,7 @@ function CompletionDialog({ appointment, patientId, services, onClose, onComplet
   const [step, setStep] = useState('prescriptionQuestion')
   const [hasPrescription, setHasPrescription] = useState(null)
   const [hasFollowUp, setHasFollowUp] = useState(null)
-  const [prescription, setPrescription] = useState({ prescribedOn: todayInManila(), genericName: '', instructions: '', file: null })
+  const [prescription, setPrescription] = useState({ file: null })
   const [followUp, setFollowUp] = useState({ recommendedOn: '', appointmentTypeId: '', notes: '' })
   const [fee, setFee] = useState('')
   const [busy, setBusy] = useState(false)
@@ -44,9 +44,8 @@ function CompletionDialog({ appointment, patientId, services, onClose, onComplet
 
   const continuePrescription = () => {
     const file = prescription.file
-    if (!prescription.genericName.trim() || !prescription.instructions.trim() || !file ||
-      !['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 5 * 1024 * 1024) {
-      setError('Complete the medication details and choose a JPEG, PNG, or WebP image up to 5 MB.')
+    if (!file || !['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 5 * 1024 * 1024) {
+      setError('Take or choose a clear JPEG, PNG, or WebP photo up to 5 MB.')
       return
     }
     setError('')
@@ -75,9 +74,9 @@ function CompletionDialog({ appointment, patientId, services, onClose, onComplet
       await api.completeDentistVisit(patientId, appointment.id, {
         proposedFeeCents,
         prescription: hasPrescription ? {
-          prescribedOn: prescription.prescribedOn,
-          genericName: prescription.genericName.trim(),
-          instructions: prescription.instructions.trim(),
+          prescribedOn: todayInManila(),
+          genericName: 'Written prescription',
+          instructions: 'See attached written prescription image.',
           imageMimeType: prescription.file.type,
           imageOriginalName: prescription.file.name,
           imageBase64: await fileBase64(prescription.file),
@@ -105,7 +104,7 @@ function CompletionDialog({ appointment, patientId, services, onClose, onComplet
 
       {step === 'prescriptionQuestion' && <div className="mt-7"><h3 className="text-xl font-extrabold">Does the patient need a medication prescription?</h3><p className="mt-2 text-sm text-ink/50">If yes, you will upload the written prescription.</p><div className="mt-6 grid grid-cols-2 gap-3"><button className="rounded-2xl border border-ink/10 px-5 py-3 font-extrabold" type="button" onClick={() => { setHasPrescription(false); setStep('followUpQuestion') }}>No</button><button className="rounded-2xl bg-brand px-5 py-3 font-extrabold text-white" type="button" onClick={() => { setHasPrescription(true); setStep('prescription') }}>Yes</button></div></div>}
 
-      {step === 'prescription' && <div className="mt-7"><h3 className="text-xl font-extrabold">Upload written prescription</h3><label className="mt-5 block text-sm font-extrabold">Prescription date<input className="input-field mt-2" max={todayInManila()} required type="date" value={prescription.prescribedOn} onChange={(event) => setPrescription({ ...prescription, prescribedOn: event.target.value })} /></label><label className="mt-4 block text-sm font-extrabold">Medication name<input className="input-field mt-2" maxLength="240" value={prescription.genericName} onChange={(event) => setPrescription({ ...prescription, genericName: event.target.value })} /></label><label className="mt-4 block text-sm font-extrabold">Directions<textarea className="input-field mt-2 min-h-24" maxLength="2000" value={prescription.instructions} onChange={(event) => setPrescription({ ...prescription, instructions: event.target.value })} /></label><label className="mt-4 block text-sm font-extrabold">Prescription image<input accept="image/jpeg,image/png,image/webp" className="mt-2 block w-full text-xs text-ink/55" type="file" onChange={(event) => setPrescription({ ...prescription, file: event.target.files?.[0] || null })} /></label><button className="mt-6 w-full rounded-2xl bg-brand px-5 py-3 font-extrabold text-white" type="button" onClick={continuePrescription}>Next</button></div>}
+      {step === 'prescription' && <div className="mt-7"><h3 className="text-xl font-extrabold">Take a photo of the written prescription</h3><p className="mt-2 text-sm text-ink/50">Make sure the full prescription is readable and well lit.</p><label className="mt-5 block text-sm font-extrabold">Prescription photo<input accept="image/jpeg,image/png,image/webp" capture="environment" className="mt-2 block w-full text-xs text-ink/55" type="file" onChange={(event) => setPrescription({ file: event.target.files?.[0] || null })} /></label><button className="mt-6 w-full rounded-2xl bg-brand px-5 py-3 font-extrabold text-white" type="button" onClick={continuePrescription}>Next</button></div>}
 
       {step === 'followUpQuestion' && <div className="mt-7"><h3 className="text-xl font-extrabold">Should the patient return for a follow-up?</h3><p className="mt-2 text-sm text-ink/50">If yes, add a recommended date for reception to schedule.</p><div className="mt-6 grid grid-cols-2 gap-3"><button className="rounded-2xl border border-ink/10 px-5 py-3 font-extrabold" type="button" onClick={() => { setHasFollowUp(false); setStep('fee') }}>No</button><button className="rounded-2xl bg-brand px-5 py-3 font-extrabold text-white" type="button" onClick={() => { setHasFollowUp(true); setStep('followUp') }}>Yes</button></div></div>}
 
@@ -123,7 +122,7 @@ export default function DentistPatientPage() {
   const [state, setState] = useState({ loading: true, chart: null, error: null })
   const [message, setMessage] = useState('')
   const [actionError, setActionError] = useState('')
-  const [prescription, setPrescription] = useState({ prescribedOn: todayInManila(), genericName: '', instructions: '', file: null })
+  const [prescription, setPrescription] = useState({ file: null })
   const [followUp, setFollowUp] = useState({ recommendedOn: '', appointmentTypeId: '', notes: '' })
   const [savingPrescription, setSavingPrescription] = useState(false)
   const [savingFollowUp, setSavingFollowUp] = useState(false)
@@ -149,15 +148,15 @@ export default function DentistPatientPage() {
     setMessage('')
     try {
       await api.uploadDentistPrescription(id, {
-        prescribedOn: prescription.prescribedOn,
-        genericName: prescription.genericName.trim(),
-        instructions: prescription.instructions.trim(),
+        prescribedOn: todayInManila(),
+        genericName: 'Written prescription',
+        instructions: 'See attached written prescription image.',
         imageMimeType: file.type,
         imageOriginalName: file.name,
         imageBase64: await fileBase64(file),
       })
-      setPrescription({ prescribedOn: todayInManila(), genericName: '', instructions: '', file: null })
-      setMessage('Prescription image and medication details saved.')
+      setPrescription({ file: null })
+      setMessage('Written prescription photo saved.')
       load()
     } catch (error) {
       setActionError(error.message || 'The prescription could not be saved.')
@@ -247,7 +246,7 @@ export default function DentistPatientPage() {
           <div className="flex items-center gap-3"><Pill className="text-brand" size={21} /><h2 className="text-xl font-extrabold">Prescription records</h2></div>
           {prescriptions.length ? <div className="mt-5 grid gap-4 sm:grid-cols-2">{prescriptions.map((item) => <article className="overflow-hidden rounded-2xl border border-ink/8" key={item.id}>
             <a href={`/api/dentist/prescriptions/${item.id}/image`} target="_blank" rel="noreferrer"><img alt={`Written prescription for ${item.genericName}`} className="h-44 w-full bg-cream object-contain" src={`/api/dentist/prescriptions/${item.id}/image`} /></a>
-            <div className="p-4"><h3 className="font-extrabold">{item.genericName}</h3><p className="mt-2 whitespace-pre-line text-sm leading-6 text-ink/60">{item.instructions}</p><p className="mt-3 text-xs font-bold text-ink/40">{formatDate(item.prescribedOn)} · {item.dentistName}</p></div>
+            <div className="p-4"><p className="text-sm font-extrabold">Written prescription</p><p className="mt-2 text-xs font-bold text-ink/40">{formatDate(item.prescribedOn)} · {item.dentistName}</p></div>
           </article>)}</div> : <p className="mt-5 text-sm text-ink/45">No prescription images uploaded.</p>}
         </section>
       </div>
@@ -255,12 +254,9 @@ export default function DentistPatientPage() {
       <aside className="space-y-6">
         <form className="rounded-3xl bg-white p-5 soft-shadow sm:p-6" onSubmit={uploadPrescription}>
           <div className="flex items-center gap-3"><ImageUp className="text-brand" size={21} /><h2 className="text-lg font-extrabold">Upload written prescription</h2></div>
-          <p className="mt-2 text-xs leading-5 text-ink/45">Stored as a private clinical record copy.</p>
-          <label className="mt-5 block text-sm font-extrabold">Prescription date<input className="input-field mt-2" max={todayInManila()} required type="date" value={prescription.prescribedOn} onChange={(event) => setPrescription({ ...prescription, prescribedOn: event.target.value })} /></label>
-          <label className="mt-4 block text-sm font-extrabold">Generic medication name<input className="input-field mt-2" maxLength="240" required value={prescription.genericName} onChange={(event) => setPrescription({ ...prescription, genericName: event.target.value })} /></label>
-          <label className="mt-4 block text-sm font-extrabold">Directions<textarea className="input-field mt-2 min-h-28" maxLength="2000" required value={prescription.instructions} onChange={(event) => setPrescription({ ...prescription, instructions: event.target.value })} /></label>
-          <label className="mt-4 block text-sm font-extrabold">Prescription image<input accept="image/jpeg,image/png,image/webp" className="mt-2 block w-full text-xs text-ink/55" required type="file" onChange={(event) => setPrescription({ ...prescription, file: event.target.files?.[0] || null })} /></label>
-          <button className="mt-5 w-full rounded-xl bg-brand px-5 py-3 text-sm font-extrabold text-white disabled:opacity-60" disabled={savingPrescription} type="submit">{savingPrescription ? 'Uploading…' : 'Save prescription'}</button>
+          <p className="mt-2 text-xs leading-5 text-ink/45">Take a clear photo. No medication details need to be retyped.</p>
+          <label className="mt-5 block text-sm font-extrabold">Prescription photo<input accept="image/jpeg,image/png,image/webp" capture="environment" className="mt-2 block w-full text-xs text-ink/55" required type="file" onChange={(event) => setPrescription({ file: event.target.files?.[0] || null })} /></label>
+          <button className="mt-5 w-full rounded-xl bg-brand px-5 py-3 text-sm font-extrabold text-white disabled:opacity-60" disabled={savingPrescription} type="submit">{savingPrescription ? 'Uploading…' : 'Save photo'}</button>
         </form>
 
         <form className="rounded-3xl bg-white p-5 soft-shadow sm:p-6" onSubmit={saveFollowUp}>
