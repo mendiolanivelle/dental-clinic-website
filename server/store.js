@@ -371,6 +371,10 @@ export function createStore(db) {
        FROM dentists d
        CROSS JOIN slots
        WHERE d.active = true
+         AND EXISTS (
+           SELECT 1 FROM staff_profiles s
+           WHERE s.dentist_id = d.id AND s.role = 'dentist' AND s.active = true
+         )
        ORDER BY slots.starts_at ASC, d.display_name ASC`,
       [date, now],
     )
@@ -765,6 +769,7 @@ export function createStore(db) {
                   count(*) FILTER (WHERE a.status = 'no_show') AS no_show_visits,
                   coalesce(sum(c.total_cents) FILTER (WHERE a.status = 'completed'), 0) AS net_billed_cents
            FROM dentists d
+           JOIN staff_profiles ds ON ds.dentist_id = d.id AND ds.role = 'dentist'
            LEFT JOIN appointments a ON a.dentist_id = d.id
              AND a.starts_at >= ($1::date AT TIME ZONE 'Asia/Manila')
              AND a.starts_at < (($2::date + 1) AT TIME ZONE 'Asia/Manila')
@@ -1267,9 +1272,13 @@ export function createStore(db) {
     async listActiveDentists() {
       const result = await db.query(
         `SELECT id, display_name
-         FROM dentists
-         WHERE active = true
-         ORDER BY display_name ASC`,
+         FROM dentists d
+         WHERE d.active = true
+           AND EXISTS (
+             SELECT 1 FROM staff_profiles s
+             WHERE s.dentist_id = d.id AND s.role = 'dentist' AND s.active = true
+           )
+         ORDER BY d.display_name ASC`,
       )
       return result.rows.map((row) => ({ id: row.id, displayName: row.display_name }))
     },
@@ -1288,6 +1297,10 @@ export function createStore(db) {
            CROSS JOIN appointment_types t
            WHERE p.id = $1
              AND d.id = $2 AND d.active = true
+             AND EXISTS (
+               SELECT 1 FROM staff_profiles s
+               WHERE s.dentist_id = d.id AND s.role = 'dentist' AND s.active = true
+             )
              AND t.id = $3
              AND $4::timestamptz > $5
              AND EXTRACT(ISODOW FROM $4::timestamptz AT TIME ZONE 'Asia/Manila') BETWEEN 1 AND 6
@@ -1388,7 +1401,13 @@ export function createStore(db) {
                AND ($2::timestamptz AT TIME ZONE 'Asia/Manila')::time < time '17:00'
                AND EXTRACT(MINUTE FROM $2::timestamptz AT TIME ZONE 'Asia/Manila') = 0
                AND EXTRACT(SECOND FROM $2::timestamptz AT TIME ZONE 'Asia/Manila') = 0
-               AND EXISTS (SELECT 1 FROM dentists d WHERE d.id = $4 AND d.active = true)
+               AND EXISTS (
+                 SELECT 1
+                 FROM dentists d
+                 JOIN staff_profiles s ON s.dentist_id = d.id
+                 WHERE d.id = $4 AND d.active = true
+                   AND s.role = 'dentist' AND s.active = true
+               )
                AND NOT EXISTS (
                  SELECT 1 FROM appointments a
                  WHERE a.id <> $1
@@ -1774,6 +1793,10 @@ export function createStore(db) {
            WHERE t.id = $2
              AND d.id = $3
              AND d.active = true
+             AND EXISTS (
+               SELECT 1 FROM staff_profiles s
+               WHERE s.dentist_id = d.id AND s.role = 'dentist' AND s.active = true
+             )
          ), inserted AS (
            INSERT INTO appointment_requests (
              patient_id, appointment_type_id, dentist_id,
