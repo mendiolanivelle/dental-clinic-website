@@ -29,7 +29,7 @@ export default function DentistPatientsPage() {
     <div className="mb-8">
       <p className="text-xs font-extrabold uppercase tracking-[.18em] text-brand/60">Clinical directory</p>
       <h1 className="mt-2 text-3xl font-extrabold tracking-tight">My patients</h1>
-      <p className="mt-2 text-sm text-ink/50">Patients assigned to you through appointments or clinical history.</p>
+      <p className="mt-2 text-sm text-ink/50">Patients with unfinished visits assigned to you.</p>
     </div>
     <form className="flex flex-col gap-3 rounded-3xl bg-white p-5 soft-shadow sm:flex-row" onSubmit={(event) => { event.preventDefault(); load(query.trim()) }}>
       <div className="relative flex-1">
@@ -53,7 +53,7 @@ export default function DentistPatientsPage() {
             <p className="mt-4 text-xs font-extrabold text-brand">Open patient workspace</p>
           </Link>
         })}
-      </div> : !loading && <EmptyState icon={UsersRound} title="No patient found" message="Only patients assigned to this dentist are available here." />}
+      </div> : !loading && <EmptyState icon={UsersRound} title="No active patient found" message="Patients leave this list after their visit is marked done." />}
     </div>
   </>
 }

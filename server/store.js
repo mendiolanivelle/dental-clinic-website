@@ -980,7 +980,8 @@ export function createStore(db) {
          JOIN patients p ON p.id = a.patient_id
          WHERE a.dentist_id = $1
            AND (a.starts_at AT TIME ZONE 'Asia/Manila')::date = $2::date
-           AND a.status IN ('scheduled', 'confirmed', 'completed')
+           AND a.status IN ('scheduled', 'confirmed')
+           AND a.dentist_done_at IS NULL
          ORDER BY a.starts_at ASC`,
         [dentistId, date],
       )
@@ -1003,11 +1004,12 @@ export function createStore(db) {
                 p.allergies, p.medical_conditions, p.current_medications,
                 p.medical_history_reviewed_at
          FROM patients p
-         WHERE (
-             EXISTS (SELECT 1 FROM appointments a WHERE a.patient_id = p.id AND a.dentist_id = $1)
-             OR EXISTS (SELECT 1 FROM clinical_records r WHERE r.patient_id = p.id AND r.dentist_id = $1)
-             OR EXISTS (SELECT 1 FROM prescriptions rx WHERE rx.patient_id = p.id AND rx.dentist_id = $1)
-             OR EXISTS (SELECT 1 FROM follow_up_recommendations f WHERE f.patient_id = p.id AND f.dentist_id = $1)
+         WHERE EXISTS (
+             SELECT 1 FROM appointments a
+             WHERE a.patient_id = p.id
+               AND a.dentist_id = $1
+               AND a.status IN ('scheduled', 'confirmed')
+               AND a.dentist_done_at IS NULL
            )
            AND (
              position(lower($2) in lower(p.display_name)) > 0

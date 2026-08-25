@@ -337,7 +337,8 @@ class MemoryStore {
   async getDentistDashboard(dentistId) {
     return {
       appointments: this.appointments
-        .filter((appointment) => appointment.dentistId === dentistId)
+        .filter((appointment) => appointment.dentistId === dentistId &&
+          ['scheduled', 'confirmed'].includes(appointment.status) && !appointment.dentistDoneAt)
         .map((appointment) => ({
           ...appointment,
           patient: {
@@ -352,7 +353,8 @@ class MemoryStore {
 
   async searchDentistPatients(dentistId, query) {
     const assigned = this.appointments.some((appointment) =>
-      appointment.patientId === this.patient.id && appointment.dentistId === dentistId)
+      appointment.patientId === this.patient.id && appointment.dentistId === dentistId &&
+      ['scheduled', 'confirmed'].includes(appointment.status) && !appointment.dentistDoneAt)
     if (!assigned || !this.patient.displayName.toLowerCase().includes(query.toLowerCase())) return []
     return [{ ...this.patient, age: 29, gender: 'female', allergies: 'Penicillin' }]
   }
@@ -1479,6 +1481,12 @@ test('dentist staff can restore their staff session but cannot use reception end
     assert.equal(completed.statusCode, 200, completed.body)
     assert.equal(dentistStore.appointments[0].proposedFeeCents, 175000)
     assert.ok(dentistStore.appointments[0].dentistDoneAt)
+
+    const finishedPatients = await dentistApp.inject({ url: '/api/dentist/patients?q=', headers: { cookie } })
+    assert.equal(finishedPatients.statusCode, 200)
+    assert.equal(finishedPatients.json().patients.length, 0)
+    const finishedDashboard = await dentistApp.inject({ url: '/api/dentist/dashboard', headers: { cookie } })
+    assert.equal(finishedDashboard.json().appointments.length, 0)
 
     const repeated = await dentistApp.inject({
       method: 'POST',
