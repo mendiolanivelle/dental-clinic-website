@@ -8,7 +8,7 @@ const navigation = [
   { label: 'Sales & collections', to: '/admin/sales', icon: BriefcaseBusiness },
   { label: 'Services', to: '/admin/services', icon: BarChart3 },
   { label: 'Comparisons', to: '/admin/comparisons', icon: CalendarRange },
-  { label: 'Doctors', to: '/admin/doctors', icon: Stethoscope },
+  { label: 'Dentists', to: '/admin/doctors', icon: Stethoscope },
   { label: 'Team accounts', to: '/admin/team', icon: UserCog },
   { label: 'Meeting view', to: '/admin/meeting', icon: Presentation },
   { label: 'Audit log', to: '/admin/audit', icon: ShieldCheck },
