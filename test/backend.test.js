@@ -361,15 +361,46 @@ class MemoryStore {
     const assigned = this.appointments.some((appointment) =>
       appointment.patientId === patientId && appointment.dentistId === dentistId)
     if (!assigned) return null
+    const appointments = this.appointments.filter((appointment) => appointment.patientId === patientId)
     return {
       patient: { ...this.patient, age: 29, gender: 'female', allergies: 'Penicillin' },
-      appointments: this.appointments.filter((appointment) => appointment.patientId === patientId),
+      appointments,
+      completionAppointment: appointments.find((appointment) =>
+        appointment.dentistId === dentistId &&
+        ['scheduled', 'confirmed'].includes(appointment.status) &&
+        !appointment.dentistDoneAt) || null,
       records: this.records.filter((record) => record.patientId === patientId),
       treatmentPlans: this.plans.filter((plan) => plan.patientId === patientId),
       prescriptions: this.prescriptions.filter((item) => item.patientId === patientId),
       followUps: this.followUps.filter((item) => item.patientId === patientId),
       services: this.services,
     }
+  }
+
+  async completeDentistVisit(input) {
+    const appointment = this.appointments.find((item) =>
+      item.id === input.appointmentId && item.patientId === input.patientId &&
+      item.dentistId === input.dentistId && ['scheduled', 'confirmed'].includes(item.status) &&
+      !item.dentistDoneAt)
+    if (!appointment) return { outcome: 'not_found' }
+    if (input.followUp?.appointmentTypeId && !this.services.some(({ id }) => id === input.followUp.appointmentTypeId)) {
+      return { outcome: 'invalid_service' }
+    }
+    if (input.prescription) {
+      this.prescriptions.push({
+        id: 'a0000000-0000-4000-8000-000000000002', patientId: input.patientId,
+        dentistName: this.dentist.displayName, ...input.prescription,
+      })
+    }
+    if (input.followUp) {
+      this.followUps.push({
+        id: 'b0000000-0000-4000-8000-000000000002', patientId: input.patientId,
+        status: 'pending', ...input.followUp,
+      })
+    }
+    appointment.dentistDoneAt = input.now
+    appointment.proposedFeeCents = input.proposedFeeCents
+    return { outcome: 'completed' }
   }
 
   async createDentistPrescription(input) {
@@ -491,8 +522,9 @@ class MemoryStore {
   async listReceptionBilling(date) {
     return {
       awaitingCheckout: this.appointments
-        .filter(({ status, startsAt }) =>
+        .filter(({ status, startsAt, dentistDoneAt }) =>
           ['scheduled', 'confirmed'].includes(status) &&
+          Boolean(dentistDoneAt) &&
           new Date(new Date(startsAt).getTime() + 8 * 60 * 60_000).toISOString().slice(0, 10) === date)
         .map((appointment) => ({
           ...appointment,
@@ -510,7 +542,8 @@ class MemoryStore {
 
   async createPatientCheckout(input) {
     const appointment = this.appointments.find(
-      ({ id, status }) => id === input.appointmentId && ['scheduled', 'confirmed'].includes(status),
+      ({ id, status, dentistDoneAt }) => id === input.appointmentId &&
+        ['scheduled', 'confirmed'].includes(status) && dentistDoneAt,
     )
     if (!appointment) return { outcome: 'not_found' }
     if (input.subtotalCents <= 0) return { outcome: 'invalid_amount' }
@@ -1148,10 +1181,14 @@ test('reception staff use a separate protected session and can confirm booking r
     assert.equal(createdPatient.json().patient.displayName, 'New Patient')
     assert.equal(createdPatient.json().patient.age, 34)
 
+    const billingBeforeDentist = await staffApp.inject({ url: '/api/staff/billing', headers: { cookie } })
+    assert.equal(billingBeforeDentist.statusCode, 200)
+    assert.equal(billingBeforeDentist.json().awaitingCheckout.length, 0)
+    staffStore.appointments[0].dentistDoneAt = currentTime
+    staffStore.appointments[0].proposedFeeCents = 250000
     const billing = await staffApp.inject({ url: '/api/staff/billing', headers: { cookie } })
-    assert.equal(billing.statusCode, 200)
     assert.equal(billing.json().awaitingCheckout.length, 1)
-    assert.equal(billing.json().awaitingCheckout[0].id, '30000000-0000-4000-8000-000000000001')
+    assert.equal(billing.json().awaitingCheckout[0].proposedFeeCents, 250000)
 
     const dentists = await staffApp.inject({ url: '/api/staff/dentists', headers: { cookie } })
     assert.equal(dentists.statusCode, 200)
@@ -1378,6 +1415,7 @@ test('dentist staff can restore their staff session but cannot use reception end
     const chart = await dentistApp.inject({ url: `/api/dentist/patients/${dentistStore.patient.id}`, headers: { cookie } })
     assert.equal(chart.statusCode, 200)
     assert.equal(chart.json().patient.allergies, 'Penicillin')
+    assert.equal(chart.json().completionAppointment.id, dentistStore.appointments[0].id)
 
     const invalidImage = await dentistApp.inject({
       method: 'POST',
@@ -1431,6 +1469,24 @@ test('dentist staff can restore their staff session but cannot use reception end
     })
     assert.equal(followUp.statusCode, 201)
     assert.equal(dentistStore.followUps[0].notes, 'Return for cleaning.')
+
+    const completed = await dentistApp.inject({
+      method: 'POST',
+      url: `/api/dentist/patients/${dentistStore.patient.id}/appointments/${dentistStore.appointments[0].id}/complete`,
+      headers: { origin: config.publicOrigin, cookie },
+      payload: { proposedFeeCents: 175000, prescription: null, followUp: null },
+    })
+    assert.equal(completed.statusCode, 200, completed.body)
+    assert.equal(dentistStore.appointments[0].proposedFeeCents, 175000)
+    assert.ok(dentistStore.appointments[0].dentistDoneAt)
+
+    const repeated = await dentistApp.inject({
+      method: 'POST',
+      url: `/api/dentist/patients/${dentistStore.patient.id}/appointments/${dentistStore.appointments[0].id}/complete`,
+      headers: { origin: config.publicOrigin, cookie },
+      payload: { proposedFeeCents: 175000, prescription: null, followUp: null },
+    })
+    assert.equal(repeated.statusCode, 409)
 
     const receptionDashboard = await dentistApp.inject({ url: '/api/staff/dashboard', headers: { cookie } })
     assert.equal(receptionDashboard.statusCode, 403)

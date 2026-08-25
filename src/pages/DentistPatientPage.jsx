@@ -3,11 +3,13 @@ import {
   AlertTriangle,
   ArrowLeft,
   CalendarPlus,
+  CheckCircle2,
   FileClock,
   ImageUp,
   Pill,
   ShieldAlert,
   Stethoscope,
+  X,
 } from 'lucide-react'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../api'
@@ -28,6 +30,94 @@ const fileBase64 = (file) => new Promise((resolve, reject) => {
   reader.readAsDataURL(file)
 })
 
+const toCents = (value) => Math.round(Number(value || 0) * 100)
+
+function CompletionDialog({ appointment, patientId, services, onClose, onComplete }) {
+  const [step, setStep] = useState('prescriptionQuestion')
+  const [hasPrescription, setHasPrescription] = useState(null)
+  const [hasFollowUp, setHasFollowUp] = useState(null)
+  const [prescription, setPrescription] = useState({ prescribedOn: todayInManila(), genericName: '', instructions: '', file: null })
+  const [followUp, setFollowUp] = useState({ recommendedOn: '', appointmentTypeId: '', notes: '' })
+  const [fee, setFee] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const continuePrescription = () => {
+    const file = prescription.file
+    if (!prescription.genericName.trim() || !prescription.instructions.trim() || !file ||
+      !['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 5 * 1024 * 1024) {
+      setError('Complete the medication details and choose a JPEG, PNG, or WebP image up to 5 MB.')
+      return
+    }
+    setError('')
+    setStep('followUpQuestion')
+  }
+
+  const continueFollowUp = () => {
+    if (!followUp.recommendedOn) {
+      setError('Choose a recommended follow-up date.')
+      return
+    }
+    setError('')
+    setStep('fee')
+  }
+
+  const finish = async (event) => {
+    event.preventDefault()
+    const proposedFeeCents = toCents(fee)
+    if (proposedFeeCents <= 0) {
+      setError('Enter the suggested treatment fee.')
+      return
+    }
+    setBusy(true)
+    setError('')
+    try {
+      await api.completeDentistVisit(patientId, appointment.id, {
+        proposedFeeCents,
+        prescription: hasPrescription ? {
+          prescribedOn: prescription.prescribedOn,
+          genericName: prescription.genericName.trim(),
+          instructions: prescription.instructions.trim(),
+          imageMimeType: prescription.file.type,
+          imageOriginalName: prescription.file.name,
+          imageBase64: await fileBase64(prescription.file),
+        } : null,
+        followUp: hasFollowUp ? {
+          recommendedOn: followUp.recommendedOn,
+          appointmentTypeId: followUp.appointmentTypeId || null,
+          notes: followUp.notes.trim(),
+        } : null,
+      })
+      onComplete()
+    } catch (requestError) {
+      setError(requestError.message || 'The visit could not be sent to reception.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return <div className="fixed inset-0 z-50 grid place-items-center bg-ink/45 p-4 backdrop-blur-sm" onMouseDown={(event) => event.target === event.currentTarget && !busy && onClose()}>
+    <section aria-labelledby="complete-visit-heading" aria-modal="true" className="max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-[30px] bg-white p-5 soft-shadow sm:p-7" role="dialog">
+      <div className="flex items-start justify-between gap-4">
+        <div><p className="text-xs font-extrabold uppercase tracking-[.16em] text-brand/60">Finish visit</p><h2 className="mt-1 text-2xl font-extrabold" id="complete-visit-heading">{appointment.typeName}</h2><p className="mt-1 text-sm text-ink/45">{formatDateTime(appointment.startsAt)}</p></div>
+        <button aria-label="Close visit completion" className="rounded-xl bg-cream p-2.5 text-ink/55" disabled={busy} type="button" onClick={onClose}><X size={19} /></button>
+      </div>
+
+      {step === 'prescriptionQuestion' && <div className="mt-7"><h3 className="text-xl font-extrabold">Does the patient need a medication prescription?</h3><p className="mt-2 text-sm text-ink/50">If yes, you will upload the written prescription.</p><div className="mt-6 grid grid-cols-2 gap-3"><button className="rounded-2xl border border-ink/10 px-5 py-3 font-extrabold" type="button" onClick={() => { setHasPrescription(false); setStep('followUpQuestion') }}>No</button><button className="rounded-2xl bg-brand px-5 py-3 font-extrabold text-white" type="button" onClick={() => { setHasPrescription(true); setStep('prescription') }}>Yes</button></div></div>}
+
+      {step === 'prescription' && <div className="mt-7"><h3 className="text-xl font-extrabold">Upload written prescription</h3><label className="mt-5 block text-sm font-extrabold">Prescription date<input className="input-field mt-2" max={todayInManila()} required type="date" value={prescription.prescribedOn} onChange={(event) => setPrescription({ ...prescription, prescribedOn: event.target.value })} /></label><label className="mt-4 block text-sm font-extrabold">Medication name<input className="input-field mt-2" maxLength="240" value={prescription.genericName} onChange={(event) => setPrescription({ ...prescription, genericName: event.target.value })} /></label><label className="mt-4 block text-sm font-extrabold">Directions<textarea className="input-field mt-2 min-h-24" maxLength="2000" value={prescription.instructions} onChange={(event) => setPrescription({ ...prescription, instructions: event.target.value })} /></label><label className="mt-4 block text-sm font-extrabold">Prescription image<input accept="image/jpeg,image/png,image/webp" className="mt-2 block w-full text-xs text-ink/55" type="file" onChange={(event) => setPrescription({ ...prescription, file: event.target.files?.[0] || null })} /></label><button className="mt-6 w-full rounded-2xl bg-brand px-5 py-3 font-extrabold text-white" type="button" onClick={continuePrescription}>Next</button></div>}
+
+      {step === 'followUpQuestion' && <div className="mt-7"><h3 className="text-xl font-extrabold">Should the patient return for a follow-up?</h3><p className="mt-2 text-sm text-ink/50">If yes, add a recommended date for reception to schedule.</p><div className="mt-6 grid grid-cols-2 gap-3"><button className="rounded-2xl border border-ink/10 px-5 py-3 font-extrabold" type="button" onClick={() => { setHasFollowUp(false); setStep('fee') }}>No</button><button className="rounded-2xl bg-brand px-5 py-3 font-extrabold text-white" type="button" onClick={() => { setHasFollowUp(true); setStep('followUp') }}>Yes</button></div></div>}
+
+      {step === 'followUp' && <div className="mt-7"><h3 className="text-xl font-extrabold">Plan the follow-up</h3><label className="mt-5 block text-sm font-extrabold">Recommended date<input className="input-field mt-2" min={todayInManila()} type="date" value={followUp.recommendedOn} onChange={(event) => setFollowUp({ ...followUp, recommendedOn: event.target.value })} /></label><label className="mt-4 block text-sm font-extrabold">Service<select className="input-field mt-2" value={followUp.appointmentTypeId} onChange={(event) => setFollowUp({ ...followUp, appointmentTypeId: event.target.value })}><option value="">To be decided</option>{services.map((service) => <option key={service.id} value={service.id}>{service.name}</option>)}</select></label><label className="mt-4 block text-sm font-extrabold">Clinical note<textarea className="input-field mt-2 min-h-24" maxLength="1000" value={followUp.notes} onChange={(event) => setFollowUp({ ...followUp, notes: event.target.value })} /></label><button className="mt-6 w-full rounded-2xl bg-brand px-5 py-3 font-extrabold text-white" type="button" onClick={continueFollowUp}>Next</button></div>}
+
+      {step === 'fee' && <form className="mt-7" onSubmit={finish}><h3 className="text-xl font-extrabold">What is the suggested treatment fee?</h3><p className="mt-2 text-sm text-ink/50">Reception can review and edit this amount before collecting payment.</p><label className="mt-5 block text-sm font-extrabold">Suggested fee<input autoFocus className="input-field mt-2" min="0.01" placeholder="0.00" required step="0.01" type="number" value={fee} onChange={(event) => setFee(event.target.value)} /></label><button className="mt-6 w-full rounded-2xl bg-brand px-5 py-3 font-extrabold text-white disabled:opacity-60" disabled={busy} type="submit">{busy ? 'Sending to reception…' : 'Done — send to billing'}</button></form>}
+
+      {error && <p className="mt-5 rounded-2xl bg-[#fff0e7] p-4 text-sm text-[#914b22]" role="alert">{error}</p>}
+    </section>
+  </div>
+}
+
 export default function DentistPatientPage() {
   const { id } = useParams()
   const [state, setState] = useState({ loading: true, chart: null, error: null })
@@ -37,6 +127,7 @@ export default function DentistPatientPage() {
   const [followUp, setFollowUp] = useState({ recommendedOn: '', appointmentTypeId: '', notes: '' })
   const [savingPrescription, setSavingPrescription] = useState(false)
   const [savingFollowUp, setSavingFollowUp] = useState(false)
+  const [showCompletion, setShowCompletion] = useState(false)
 
   const load = useCallback(() => {
     setState({ loading: true, chart: null, error: null })
@@ -99,7 +190,7 @@ export default function DentistPatientPage() {
   if (state.loading) return <LoadingState label="Opening patient workspace…" />
   if (state.error) return <ErrorState error={state.error} onRetry={load} />
 
-  const { patient, appointments = [], records = [], treatmentPlans = [], prescriptions = [], followUps = [], services = [] } = state.chart
+  const { patient, appointments = [], completionAppointment, records = [], treatmentPlans = [], prescriptions = [], followUps = [], services = [] } = state.chart
   const medicalAlerts = [
     ['Allergies', patient.allergies],
     ['Medical conditions', patient.medicalConditions],
@@ -116,9 +207,7 @@ export default function DentistPatientPage() {
           <h1 className="text-3xl font-extrabold tracking-tight">{patient.displayName}</h1>
           <p className="mt-2 text-sm text-white/70">Patient ID {patient.patientNumber} · Age {patient.age ?? 'not recorded'} · {titleCase(patient.gender || 'not recorded')}</p>
         </div>
-        <div className="rounded-2xl bg-white/10 px-4 py-3 text-xs font-bold">
-          BP {patient.bloodPressureSystolic && patient.bloodPressureDiastolic ? `${patient.bloodPressureSystolic}/${patient.bloodPressureDiastolic} mmHg` : 'not recorded'} · Weight {patient.weightKg ? `${patient.weightKg} kg` : 'not recorded'}
-        </div>
+        <div className="flex flex-col gap-3 sm:items-end"><div className="rounded-2xl bg-white/10 px-4 py-3 text-xs font-bold">BP {patient.bloodPressureSystolic && patient.bloodPressureDiastolic ? `${patient.bloodPressureSystolic}/${patient.bloodPressureDiastolic} mmHg` : 'not recorded'} · Weight {patient.weightKg ? `${patient.weightKg} kg` : 'not recorded'}</div>{completionAppointment && <button className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-extrabold text-brand" type="button" onClick={() => setShowCompletion(true)}><CheckCircle2 size={18} /> Done</button>}</div>
       </div>
     </section>
 
@@ -185,5 +274,6 @@ export default function DentistPatientPage() {
         </form>
       </aside>
     </div>
+    {showCompletion && completionAppointment && <CompletionDialog appointment={completionAppointment} patientId={patient.id} services={services} onClose={() => setShowCompletion(false)} onComplete={() => { setShowCompletion(false); setMessage('Visit finished and sent to reception for billing.'); load() }} />}
   </>
 }

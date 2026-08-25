@@ -57,7 +57,7 @@ export default function ReceptionBillingPage() {
   const startCheckout = (appointment) => {
     setCheckout(appointment)
     setDescription(appointment.typeName)
-    setSubtotal('')
+    setSubtotal(appointment.proposedFeeCents ? (appointment.proposedFeeCents / 100).toFixed(2) : '')
     setMethod('cash')
     setReference('')
     setPaymentConfirmed(false)
@@ -167,7 +167,7 @@ export default function ReceptionBillingPage() {
 
     <section className="mb-10" aria-labelledby="checkout-heading">
       <h2 id="checkout-heading" className="text-xl font-extrabold">Today's visits awaiting checkout</h2>
-      <p className="mt-1 text-sm text-ink/45">Only today's confirmed appointments appear here. Future visits stay in the calendar.</p>
+      <p className="mt-1 text-sm text-ink/45">Only visits marked done by the dentist appear here. Reception can edit the suggested fee before payment.</p>
       {checkout && <form className="mt-5 rounded-3xl border border-brand/15 bg-mint/55 p-5 sm:p-6" onSubmit={submitCheckout}>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div><p className="text-xs font-extrabold uppercase text-brand/60">Checkout patient</p><h3 className="mt-1 text-lg font-extrabold">{checkout.patient.displayName}</h3></div>
@@ -177,7 +177,7 @@ export default function ReceptionBillingPage() {
           <label className="text-sm font-extrabold sm:col-span-2">Service performed
             <input className="mt-2 w-full rounded-2xl border border-ink/10 bg-white px-4 py-3 font-semibold" maxLength="240" required value={description} onChange={(event) => setDescription(event.target.value)} />
           </label>
-          <label className="text-sm font-extrabold">Service charge
+          <label className="text-sm font-extrabold">Service charge <span className="font-normal text-ink/40">(editable)</span>
             <input className="mt-2 w-full rounded-2xl border border-ink/10 bg-white px-4 py-3 font-semibold" type="number" min="0.01" step="0.01" required value={subtotal} onChange={(event) => setSubtotal(event.target.value)} placeholder="0.00" />
           </label>
         </div>
@@ -191,12 +191,12 @@ export default function ReceptionBillingPage() {
       <div className="mt-5 grid gap-4 xl:grid-cols-2">
         {awaiting.map((appointment) => <article className="rounded-3xl bg-white p-5 soft-shadow" key={appointment.id}>
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-            <div className="min-w-0 flex-1"><h3 className="font-extrabold">{appointment.patient.displayName}</h3><p className="mt-1 text-sm text-ink/50">{appointment.typeName} · {appointment.dentistName}</p><p className="mt-2 text-xs font-bold text-ink/40">{formatDate(appointment.startsAt)} at {formatTime(appointment.startsAt)} · {appointment.patient.patientNumber}</p></div>
+            <div className="min-w-0 flex-1"><h3 className="font-extrabold">{appointment.patient.displayName}</h3><p className="mt-1 text-sm text-ink/50">{appointment.typeName} · {appointment.dentistName}</p><p className="mt-2 text-xs font-bold text-ink/40">{formatDate(appointment.startsAt)} at {formatTime(appointment.startsAt)} · {appointment.patient.patientNumber}</p><p className="mt-2 text-xs font-extrabold text-brand">Dentist suggested {formatCurrency(appointment.proposedFeeCents)}</p></div>
             <button className="rounded-xl bg-brand px-4 py-2.5 text-xs font-extrabold text-white hover:bg-brand-dark" type="button" onClick={() => startCheckout(appointment)}>Check out</button>
           </div>
         </article>)}
       </div>
-      {!awaiting.length && <div className="mt-5"><EmptyState icon={CheckCircle2} title="No visits awaiting checkout today" message="Today's confirmed appointments will appear here for reception." /></div>}
+      {!awaiting.length && <div className="mt-5"><EmptyState icon={CheckCircle2} title="No visits awaiting checkout today" message="A visit appears here after its dentist marks it done." /></div>}
     </section>
 
     <section className="mb-10" aria-labelledby="payment-ledger-heading">

@@ -134,6 +134,11 @@ export const api = {
   searchDentistPatients: (query) =>
     request(`/api/dentist/patients?q=${encodeURIComponent(query)}`),
   getDentistPatient: (id) => request(`/api/dentist/patients/${id}`),
+  completeDentistVisit: (patientId, appointmentId, details) =>
+    request(`/api/dentist/patients/${patientId}/appointments/${appointmentId}/complete`, {
+      method: 'POST',
+      body: json(details),
+    }),
   uploadDentistPrescription: (patientId, details) =>
     request(`/api/dentist/patients/${patientId}/prescriptions`, {
       method: 'POST',

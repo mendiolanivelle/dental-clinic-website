@@ -7,6 +7,16 @@ const idParams = {
   properties: { id: { type: 'string', format: 'uuid' } },
 }
 
+const completionParams = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['id', 'appointmentId'],
+  properties: {
+    id: { type: 'string', format: 'uuid' },
+    appointmentId: { type: 'string', format: 'uuid' },
+  },
+}
+
 const manilaDate = (date) =>
   new Date(date.getTime() + 8 * 60 * 60_000).toISOString().slice(0, 10)
 
@@ -88,12 +98,123 @@ export default async function dentistRoutes(app, { store, config, now }) {
     '/api/dentist/patients/:id',
     { preHandler: requireDentist, schema: { params: idParams } },
     async (request, reply) => {
-      const chart = await store.getDentistPatient(request.staff.dentistId, request.params.id)
+      const chart = await store.getDentistPatient(request.staff.dentistId, request.params.id, now())
       if (!chart) {
         return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'That patient record was not found.' } })
       }
       await audit(request, 'dentist.patient_chart_viewed', 'patient', request.params.id)
       return chart
+    },
+  )
+
+  app.post(
+    '/api/dentist/patients/:id/appointments/:appointmentId/complete',
+    {
+      preHandler: requireDentist,
+      bodyLimit: 7 * 1024 * 1024,
+      schema: {
+        params: completionParams,
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['proposedFeeCents', 'prescription', 'followUp'],
+          properties: {
+            proposedFeeCents: { type: 'integer', minimum: 1, maximum: 100_000_000 },
+            prescription: {
+              anyOf: [
+                { type: 'null' },
+                {
+                  type: 'object',
+                  additionalProperties: false,
+                  required: ['prescribedOn', 'genericName', 'instructions', 'imageMimeType', 'imageOriginalName', 'imageBase64'],
+                  properties: {
+                    prescribedOn: { type: 'string', format: 'date' },
+                    genericName: { type: 'string', minLength: 1, maxLength: 240 },
+                    instructions: { type: 'string', minLength: 1, maxLength: 2000 },
+                    imageMimeType: { type: 'string', enum: Object.keys(imageSignatures) },
+                    imageOriginalName: { type: 'string', minLength: 1, maxLength: 255 },
+                    imageBase64: { type: 'string', minLength: 4, maxLength: 7_000_000 },
+                  },
+                },
+              ],
+            },
+            followUp: {
+              anyOf: [
+                { type: 'null' },
+                {
+                  type: 'object',
+                  additionalProperties: false,
+                  required: ['recommendedOn'],
+                  properties: {
+                    recommendedOn: { type: 'string', format: 'date' },
+                    appointmentTypeId: { anyOf: [{ type: 'string', format: 'uuid' }, { type: 'null' }] },
+                    notes: { type: 'string', maxLength: 1000 },
+                  },
+                },
+              ],
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const today = manilaDate(now())
+      let prescription = null
+      if (request.body.prescription) {
+        const image = decodeImage(request.body.prescription)
+        const genericName = request.body.prescription.genericName.trim()
+        const instructions = request.body.prescription.instructions.trim()
+        if (!image || !genericName || !instructions || request.body.prescription.prescribedOn > today) {
+          return reply.code(400).send({
+            error: { code: 'INVALID_PRESCRIPTION', message: 'Complete the medication details and upload a valid image up to 5 MB.' },
+          })
+        }
+        prescription = {
+          prescribedOn: request.body.prescription.prescribedOn,
+          genericName,
+          instructions,
+          imageMimeType: request.body.prescription.imageMimeType,
+          imageOriginalName: image.originalName,
+          imageBytes: image.bytes,
+          imageSha256: sha256(image.bytes),
+        }
+      }
+
+      const followUp = request.body.followUp
+        ? {
+            recommendedOn: request.body.followUp.recommendedOn,
+            appointmentTypeId: request.body.followUp.appointmentTypeId || null,
+            notes: request.body.followUp.notes?.trim() || null,
+          }
+        : null
+      if (followUp && followUp.recommendedOn < today) {
+        return reply.code(400).send({
+          error: { code: 'INVALID_DATE', message: 'Choose today or a future follow-up date.' },
+        })
+      }
+
+      const result = await store.completeDentistVisit({
+        appointmentId: request.params.appointmentId,
+        patientId: request.params.id,
+        dentistId: request.staff.dentistId,
+        staffId: request.staff.id,
+        proposedFeeCents: request.body.proposedFeeCents,
+        prescription,
+        followUp,
+        now: now(),
+      })
+      if (result.outcome === 'not_found') {
+        return reply.code(409).send({
+          error: { code: 'VISIT_NOT_READY', message: 'This visit is already done or is not ready to finish.' },
+        })
+      }
+      if (result.outcome === 'invalid_service') {
+        return reply.code(400).send({
+          error: { code: 'INVALID_SERVICE', message: 'Choose a valid follow-up service.' },
+        })
+      }
+      await audit(request, 'dentist.visit_finished', 'appointment', request.params.appointmentId)
+      return { completed: true }
     },
   )
 

@@ -1,11 +1,16 @@
 const appointmentFromRow = (row) => ({
   id: row.id,
+  dentistId: row.dentist_id,
   typeName: row.type_name,
   startsAt: row.starts_at,
   endsAt: row.ends_at,
   status: row.status,
   dentistName: row.dentist_name,
   patientInstructions: row.patient_instructions,
+  dentistDoneAt: row.dentist_done_at,
+  proposedFeeCents: row.proposed_fee_cents === null || row.proposed_fee_cents === undefined
+    ? null
+    : Number(row.proposed_fee_cents),
 })
 
 const recordFromRow = (row) => ({
@@ -160,6 +165,9 @@ const receptionAppointmentFromRow = (row) => ({
   status: row.status,
   dentistId: row.dentist_id,
   dentistName: row.dentist_name,
+  proposedFeeCents: row.proposed_fee_cents === null || row.proposed_fee_cents === undefined
+    ? null
+    : Number(row.proposed_fee_cents),
   patient: {
     id: row.patient_id,
     displayName: row.patient_name,
@@ -1012,7 +1020,7 @@ export function createStore(db) {
       return result.rows.map(dentistPatientFromRow)
     },
 
-    async getDentistPatient(dentistId, patientId) {
+    async getDentistPatient(dentistId, patientId, now = new Date()) {
       const patientResult = await db.query(
         `SELECT p.id, p.display_name, p.patient_number, p.phone_e164, p.age, p.gender,
                 p.weight_kg, p.blood_pressure_systolic, p.blood_pressure_diastolic,
@@ -1032,14 +1040,20 @@ export function createStore(db) {
 
       const [appointments, records, plans, prescriptions, followUps, services] = await Promise.all([
         db.query(
-          `SELECT a.id, t.name AS type_name, a.starts_at, a.ends_at, a.status,
-                  d.display_name AS dentist_name, a.patient_instructions
+          `SELECT a.id, a.dentist_id, t.name AS type_name, a.starts_at, a.ends_at, a.status,
+                  d.display_name AS dentist_name, a.patient_instructions,
+                  a.dentist_done_at, a.proposed_fee_cents,
+                  (a.dentist_id = $2
+                    AND a.status IN ('scheduled', 'confirmed')
+                    AND a.dentist_done_at IS NULL
+                    AND (a.starts_at AT TIME ZONE 'Asia/Manila')::date <=
+                        ($3::timestamptz AT TIME ZONE 'Asia/Manila')::date) AS can_complete
            FROM appointments a
            JOIN appointment_types t ON t.id = a.appointment_type_id
            JOIN dentists d ON d.id = a.dentist_id
-           WHERE a.patient_id = $1
+          WHERE a.patient_id = $1
            ORDER BY a.starts_at DESC`,
-          [patientId],
+          [patientId, dentistId, now],
         ),
         db.query(
           `SELECT r.id, r.appointment_id, r.procedure_name, r.treated_on,
@@ -1082,15 +1096,94 @@ export function createStore(db) {
         ),
         listServices(),
       ])
+      const appointmentRows = appointments.rows
+      const completionAppointment = appointmentRows.find((row) => row.can_complete)
       return {
         patient: dentistPatientFromRow(patientResult.rows[0]),
-        appointments: appointments.rows.map(appointmentFromRow),
+        appointments: appointmentRows.map(appointmentFromRow),
+        completionAppointment: completionAppointment ? appointmentFromRow(completionAppointment) : null,
         records: records.rows.map(recordFromRow),
         treatmentPlans: plans.rows.map(treatmentPlanFromRow),
         prescriptions: prescriptions.rows.map(prescriptionFromRow),
         followUps: followUps.rows.map(followUpFromRow),
         services,
       }
+    },
+
+    async completeDentistVisit({
+      appointmentId,
+      patientId,
+      dentistId,
+      staffId,
+      proposedFeeCents,
+      prescription,
+      followUp,
+      now,
+    }) {
+      return db.transaction(async (client) => {
+        const selected = await client.query(
+          `SELECT id, patient_id
+           FROM appointments
+           WHERE id = $1
+             AND patient_id = $2
+             AND dentist_id = $3
+             AND status IN ('scheduled', 'confirmed')
+             AND dentist_done_at IS NULL
+             AND (starts_at AT TIME ZONE 'Asia/Manila')::date <=
+                 ($4::timestamptz AT TIME ZONE 'Asia/Manila')::date
+           FOR UPDATE`,
+          [appointmentId, patientId, dentistId, now],
+        )
+        if (!selected.rowCount) return { outcome: 'not_found' }
+
+        let prescriptionId = null
+        if (prescription) {
+          const inserted = await client.query(
+            `INSERT INTO prescriptions (
+               patient_id, dentist_id, appointment_id, created_by_staff_id,
+               prescribed_on, generic_name, instructions, image_mime_type,
+               image_original_name, image_byte_size, image_sha256, image_bytes, created_at
+             ) VALUES ($1, $2, $3, $4, $5::date, $6, $7, $8, $9, $10, $11, $12, $13)
+             RETURNING id`,
+            [
+              patientId, dentistId, appointmentId, staffId,
+              prescription.prescribedOn, prescription.genericName, prescription.instructions,
+              prescription.imageMimeType, prescription.imageOriginalName,
+              prescription.imageBytes.length, prescription.imageSha256,
+              prescription.imageBytes, now,
+            ],
+          )
+          prescriptionId = inserted.rows[0].id
+        }
+
+        let followUpId = null
+        if (followUp) {
+          if (followUp.appointmentTypeId) {
+            const service = await client.query('SELECT 1 FROM appointment_types WHERE id = $1', [followUp.appointmentTypeId])
+            if (!service.rowCount) return { outcome: 'invalid_service' }
+          }
+          const inserted = await client.query(
+            `INSERT INTO follow_up_recommendations (
+               patient_id, dentist_id, appointment_type_id, created_by_staff_id,
+               recommended_on, notes, status, created_at, updated_at
+             ) VALUES ($1, $2, $3, $4, $5::date, $6, 'pending', $7, $7)
+             RETURNING id`,
+            [patientId, dentistId, followUp.appointmentTypeId, staffId, followUp.recommendedOn, followUp.notes, now],
+          )
+          followUpId = inserted.rows[0].id
+        }
+
+        await client.query(
+          `UPDATE appointments
+           SET dentist_done_at = $2,
+               dentist_done_by_staff_id = $3,
+               proposed_fee_cents = $4,
+               updated_at = $2
+           WHERE id = $1`,
+          [appointmentId, now, staffId, proposedFeeCents],
+        )
+        return { outcome: 'completed', prescriptionId, followUpId }
+      })
     },
 
     async createDentistPrescription({
@@ -1342,13 +1435,15 @@ export function createStore(db) {
         db.query(
           `SELECT a.id, t.name AS type_name, a.starts_at, a.ends_at, a.status,
                   d.display_name AS dentist_name, p.id AS patient_id,
-                  p.display_name AS patient_name, p.patient_number, p.phone_e164
+                  p.display_name AS patient_name, p.patient_number, p.phone_e164,
+                  a.proposed_fee_cents
            FROM appointments a
            JOIN appointment_types t ON t.id = a.appointment_type_id
            JOIN dentists d ON d.id = a.dentist_id
            JOIN patients p ON p.id = a.patient_id
            LEFT JOIN patient_charges c ON c.appointment_id = a.id
            WHERE a.status IN ('scheduled', 'confirmed')
+             AND a.dentist_done_at IS NOT NULL
              AND (a.starts_at AT TIME ZONE 'Asia/Manila')::date = $1::date
              AND c.id IS NULL
            ORDER BY a.starts_at ASC
@@ -1474,7 +1569,9 @@ export function createStore(db) {
         const selected = await client.query(
           `SELECT id, patient_id
            FROM appointments
-           WHERE id = $1 AND status IN ('scheduled', 'confirmed')
+           WHERE id = $1
+             AND status IN ('scheduled', 'confirmed')
+             AND dentist_done_at IS NOT NULL
            FOR UPDATE`,
           [appointmentId],
         )
