@@ -15,6 +15,7 @@ import { Link, useParams } from 'react-router-dom'
 import { api } from '../api'
 import { EmptyState, ErrorState, LoadingState } from '../components/PageState'
 import { formatDate, formatDateTime, titleCase } from '../format'
+import { preparePrescriptionImage } from '../prescriptionImage'
 
 const todayInManila = () => new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Asia/Manila',
@@ -22,13 +23,6 @@ const todayInManila = () => new Intl.DateTimeFormat('en-CA', {
   month: '2-digit',
   day: '2-digit',
 }).format(new Date())
-
-const fileBase64 = (file) => new Promise((resolve, reject) => {
-  const reader = new FileReader()
-  reader.onload = () => resolve(String(reader.result).split(',')[1] || '')
-  reader.onerror = () => reject(new Error('The selected image could not be read.'))
-  reader.readAsDataURL(file)
-})
 
 const toCents = (value) => Math.round(Number(value || 0) * 100)
 
@@ -44,8 +38,8 @@ function CompletionDialog({ appointment, patientId, services, onClose, onComplet
 
   const continuePrescription = () => {
     const file = prescription.file
-    if (!file || !['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 5 * 1024 * 1024) {
-      setError('Take or choose a clear JPEG, PNG, or WebP photo up to 5 MB.')
+    if (!file || !['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      setError('Take or choose a clear JPEG, PNG, or WebP photo.')
       return
     }
     setError('')
@@ -71,15 +65,16 @@ function CompletionDialog({ appointment, patientId, services, onClose, onComplet
     setBusy(true)
     setError('')
     try {
+      const preparedImage = hasPrescription
+        ? await preparePrescriptionImage(prescription.file)
+        : null
       await api.completeDentistVisit(patientId, appointment.id, {
         proposedFeeCents,
         prescription: hasPrescription ? {
           prescribedOn: todayInManila(),
           genericName: 'Written prescription',
           instructions: 'See attached written prescription image.',
-          imageMimeType: prescription.file.type,
-          imageOriginalName: prescription.file.name,
-          imageBase64: await fileBase64(prescription.file),
+          ...preparedImage,
         } : null,
         followUp: hasFollowUp ? {
           recommendedOn: followUp.recommendedOn,
@@ -104,7 +99,7 @@ function CompletionDialog({ appointment, patientId, services, onClose, onComplet
 
       {step === 'prescriptionQuestion' && <div className="mt-7"><h3 className="text-xl font-extrabold">Does the patient need a medication prescription?</h3><p className="mt-2 text-sm text-ink/50">If yes, you will upload the written prescription.</p><div className="mt-6 grid grid-cols-2 gap-3"><button className="rounded-2xl border border-ink/10 px-5 py-3 font-extrabold" type="button" onClick={() => { setHasPrescription(false); setStep('followUpQuestion') }}>No</button><button className="rounded-2xl bg-brand px-5 py-3 font-extrabold text-white" type="button" onClick={() => { setHasPrescription(true); setStep('prescription') }}>Yes</button></div></div>}
 
-      {step === 'prescription' && <div className="mt-7"><h3 className="text-xl font-extrabold">Take a photo of the written prescription</h3><p className="mt-2 text-sm text-ink/50">Make sure the full prescription is readable and well lit.</p><label className="mt-5 block text-sm font-extrabold">Prescription photo<input accept="image/jpeg,image/png,image/webp" capture="environment" className="mt-2 block w-full text-xs text-ink/55" type="file" onChange={(event) => setPrescription({ file: event.target.files?.[0] || null })} /></label><button className="mt-6 w-full rounded-2xl bg-brand px-5 py-3 font-extrabold text-white" type="button" onClick={continuePrescription}>Next</button></div>}
+      {step === 'prescription' && <div className="mt-7"><h3 className="text-xl font-extrabold">Take a photo of the written prescription</h3><p className="mt-2 text-sm text-ink/50">Make sure the full prescription is readable and well lit. Large photos are compressed automatically to 2 MB or less.</p><label className="mt-5 block text-sm font-extrabold">Prescription photo<input accept="image/jpeg,image/png,image/webp" capture="environment" className="mt-2 block w-full text-xs text-ink/55" type="file" onChange={(event) => setPrescription({ file: event.target.files?.[0] || null })} /></label><button className="mt-6 w-full rounded-2xl bg-brand px-5 py-3 font-extrabold text-white" type="button" onClick={continuePrescription}>Next</button></div>}
 
       {step === 'followUpQuestion' && <div className="mt-7"><h3 className="text-xl font-extrabold">Should the patient return for a follow-up?</h3><p className="mt-2 text-sm text-ink/50">If yes, add a recommended date for reception to schedule.</p><div className="mt-6 grid grid-cols-2 gap-3"><button className="rounded-2xl border border-ink/10 px-5 py-3 font-extrabold" type="button" onClick={() => { setHasFollowUp(false); setStep('fee') }}>No</button><button className="rounded-2xl bg-brand px-5 py-3 font-extrabold text-white" type="button" onClick={() => { setHasFollowUp(true); setStep('followUp') }}>Yes</button></div></div>}
 
@@ -139,21 +134,20 @@ export default function DentistPatientPage() {
   async function uploadPrescription(event) {
     event.preventDefault()
     const file = prescription.file
-    if (!file || !['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 5 * 1024 * 1024) {
-      setActionError('Choose a JPEG, PNG, or WebP prescription image up to 5 MB.')
+    if (!file || !['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      setActionError('Choose a JPEG, PNG, or WebP prescription image.')
       return
     }
     setSavingPrescription(true)
     setActionError('')
     setMessage('')
     try {
+      const preparedImage = await preparePrescriptionImage(file)
       await api.uploadDentistPrescription(id, {
         prescribedOn: todayInManila(),
         genericName: 'Written prescription',
         instructions: 'See attached written prescription image.',
-        imageMimeType: file.type,
-        imageOriginalName: file.name,
-        imageBase64: await fileBase64(file),
+        ...preparedImage,
       })
       setPrescription({ file: null })
       setMessage('Written prescription photo saved.')
@@ -254,7 +248,7 @@ export default function DentistPatientPage() {
       <aside className="space-y-6">
         <form className="rounded-3xl bg-white p-5 soft-shadow sm:p-6" onSubmit={uploadPrescription}>
           <div className="flex items-center gap-3"><ImageUp className="text-brand" size={21} /><h2 className="text-lg font-extrabold">Upload written prescription</h2></div>
-          <p className="mt-2 text-xs leading-5 text-ink/45">Take a clear photo. No medication details need to be retyped.</p>
+          <p className="mt-2 text-xs leading-5 text-ink/45">Take a clear photo. No medication details need to be retyped. Large photos are compressed automatically to 2 MB or less.</p>
           <label className="mt-5 block text-sm font-extrabold">Prescription photo<input accept="image/jpeg,image/png,image/webp" capture="environment" className="mt-2 block w-full text-xs text-ink/55" required type="file" onChange={(event) => setPrescription({ file: event.target.files?.[0] || null })} /></label>
           <button className="mt-5 w-full rounded-xl bg-brand px-5 py-3 text-sm font-extrabold text-white disabled:opacity-60" disabled={savingPrescription} type="submit">{savingPrescription ? 'Uploading…' : 'Save photo'}</button>
         </form>

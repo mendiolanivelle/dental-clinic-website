@@ -29,7 +29,7 @@ const imageSignatures = {
 const decodeImage = ({ imageBase64, imageMimeType, imageOriginalName }) => {
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(imageBase64) || imageBase64.length % 4 !== 0) return null
   const bytes = Buffer.from(imageBase64, 'base64')
-  if (!bytes.length || bytes.length > 5 * 1024 * 1024 || !imageSignatures[imageMimeType]?.(bytes)) return null
+  if (!bytes.length || bytes.length > 2 * 1024 * 1024 || !imageSignatures[imageMimeType]?.(bytes)) return null
   const originalName = imageOriginalName
     .split(/[\\/]/u)
     .at(-1)
@@ -69,7 +69,7 @@ export default async function dentistRoutes(app, { store, config, now }) {
   }
 
   app.get('/api/dentist/dashboard', { preHandler: requireDentist }, async (request) => {
-    const dashboard = await store.getDentistDashboard(request.staff.dentistId, manilaDate(now()))
+    const dashboard = await store.getDentistDashboard(request.staff.dentistId, manilaDate(now()), now())
     await audit(request, 'dentist.dashboard_viewed')
     return dashboard
   })
@@ -111,7 +111,7 @@ export default async function dentistRoutes(app, { store, config, now }) {
     '/api/dentist/patients/:id/appointments/:appointmentId/complete',
     {
       preHandler: requireDentist,
-      bodyLimit: 7 * 1024 * 1024,
+      bodyLimit: 3 * 1024 * 1024,
       schema: {
         params: completionParams,
         body: {
@@ -133,7 +133,7 @@ export default async function dentistRoutes(app, { store, config, now }) {
                     instructions: { type: 'string', minLength: 1, maxLength: 2000 },
                     imageMimeType: { type: 'string', enum: Object.keys(imageSignatures) },
                     imageOriginalName: { type: 'string', minLength: 1, maxLength: 255 },
-                    imageBase64: { type: 'string', minLength: 4, maxLength: 7_000_000 },
+                    imageBase64: { type: 'string', minLength: 4, maxLength: 2_800_000 },
                   },
                 },
               ],
@@ -166,7 +166,7 @@ export default async function dentistRoutes(app, { store, config, now }) {
         const instructions = request.body.prescription.instructions.trim()
         if (!image || !genericName || !instructions || request.body.prescription.prescribedOn > today) {
           return reply.code(400).send({
-            error: { code: 'INVALID_PRESCRIPTION', message: 'Complete the medication details and upload a valid image up to 5 MB.' },
+            error: { code: 'INVALID_PRESCRIPTION', message: 'Upload a valid prescription photo up to 2 MB.' },
           })
         }
         prescription = {
@@ -222,7 +222,7 @@ export default async function dentistRoutes(app, { store, config, now }) {
     '/api/dentist/patients/:id/prescriptions',
     {
       preHandler: requireDentist,
-      bodyLimit: 7 * 1024 * 1024,
+      bodyLimit: 3 * 1024 * 1024,
       schema: {
         params: idParams,
         body: {
@@ -235,7 +235,7 @@ export default async function dentistRoutes(app, { store, config, now }) {
             instructions: { type: 'string', minLength: 1, maxLength: 2000 },
             imageMimeType: { type: 'string', enum: Object.keys(imageSignatures) },
             imageOriginalName: { type: 'string', minLength: 1, maxLength: 255 },
-            imageBase64: { type: 'string', minLength: 4, maxLength: 7_000_000 },
+            imageBase64: { type: 'string', minLength: 4, maxLength: 2_800_000 },
           },
         },
       },
@@ -244,7 +244,7 @@ export default async function dentistRoutes(app, { store, config, now }) {
       const image = decodeImage(request.body)
       if (!image || request.body.prescribedOn > manilaDate(now())) {
         return reply.code(400).send({
-          error: { code: 'INVALID_PRESCRIPTION_IMAGE', message: 'Upload a valid JPEG, PNG, or WebP image up to 5 MB.' },
+          error: { code: 'INVALID_PRESCRIPTION_IMAGE', message: 'Upload a valid JPEG, PNG, or WebP image up to 2 MB.' },
         })
       }
       const id = await store.createDentistPrescription({

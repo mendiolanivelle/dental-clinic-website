@@ -334,20 +334,22 @@ class MemoryStore {
     return this.audits.filter(({ action }) => action.startsWith('admin.'))
   }
 
-  async getDentistDashboard(dentistId) {
+  async getDentistDashboard(dentistId, date) {
+    const active = this.appointments
+      .filter((appointment) => appointment.dentistId === dentistId &&
+        ['scheduled', 'confirmed'].includes(appointment.status) && !appointment.dentistDoneAt)
+    const withPatient = (appointment) => ({
+      ...appointment,
+      patient: {
+        ...this.patient,
+        age: 29,
+        gender: 'female',
+        allergies: 'Penicillin',
+      },
+    })
     return {
-      appointments: this.appointments
-        .filter((appointment) => appointment.dentistId === dentistId &&
-          ['scheduled', 'confirmed'].includes(appointment.status) && !appointment.dentistDoneAt)
-        .map((appointment) => ({
-          ...appointment,
-          patient: {
-            ...this.patient,
-            age: 29,
-            gender: 'female',
-            allergies: 'Penicillin',
-          },
-        })),
+      appointments: active.filter(({ startsAt }) => startsAt?.slice(0, 10) === date).map(withPatient),
+      upcomingAppointments: active.filter(({ startsAt }) => startsAt?.slice(0, 10) > date).map(withPatient),
     }
   }
 
@@ -425,6 +427,20 @@ class MemoryStore {
   async getDentistPrescriptionImage(dentistId, prescriptionId) {
     const item = this.prescriptions.find(({ id }) => id === prescriptionId)
     if (!item || dentistId !== this.dentist.id) return null
+    return { mimeType: item.imageMimeType, originalName: item.imageOriginalName, bytes: item.imageBytes }
+  }
+
+  async listPatientPrescriptions(patientId) {
+    return this.prescriptions.filter((item) => item.patientId === patientId)
+  }
+
+  async listPatientFollowUps(patientId) {
+    return this.followUps.filter((item) => item.patientId === patientId)
+  }
+
+  async getPatientPrescriptionImage(patientId, prescriptionId) {
+    const item = this.prescriptions.find(({ id }) => id === prescriptionId)
+    if (!item || item.patientId !== patientId) return null
     return { mimeType: item.imageMimeType, originalName: item.imageOriginalName, bytes: item.imageBytes }
   }
 
@@ -1459,6 +1475,23 @@ test('dentist staff can restore their staff session but cannot use reception end
     assert.equal(prescriptionImage.headers['content-type'], 'image/png')
     assert.deepEqual(prescriptionImage.rawPayload, imageBytes)
 
+    const oversizedImage = Buffer.alloc(2 * 1024 * 1024 + 1)
+    Buffer.from('89504e470d0a1a0a', 'hex').copy(oversizedImage)
+    const rejectedOversizedImage = await dentistApp.inject({
+      method: 'POST',
+      url: `/api/dentist/patients/${dentistStore.patient.id}/prescriptions`,
+      headers: { origin: config.publicOrigin, cookie },
+      payload: {
+        prescribedOn: '2030-01-01',
+        genericName: 'Written prescription',
+        instructions: 'See attached image.',
+        imageMimeType: 'image/png',
+        imageOriginalName: 'too-large.png',
+        imageBase64: oversizedImage.toString('base64'),
+      },
+    })
+    assert.equal(rejectedOversizedImage.statusCode, 400)
+
     const followUp = await dentistApp.inject({
       method: 'POST',
       url: `/api/dentist/patients/${dentistStore.patient.id}/follow-ups`,
@@ -1471,6 +1504,24 @@ test('dentist staff can restore their staff session but cannot use reception end
     })
     assert.equal(followUp.statusCode, 201)
     assert.equal(dentistStore.followUps[0].notes, 'Return for cleaning.')
+
+    const patientLogin = await dentistApp.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      headers: { origin: config.publicOrigin },
+      payload: { fullName: dentistStore.patient.displayName, patientNumber: dentistStore.patient.patientNumber },
+    })
+    const patientCookie = patientLogin.headers['set-cookie'].split(';')[0]
+    const patientHistory = await dentistApp.inject({ url: '/api/me/records', headers: { cookie: patientCookie } })
+    assert.equal(patientHistory.statusCode, 200)
+    assert.equal(patientHistory.json().prescriptions[0].id, uploaded.json().prescriptionId)
+    assert.equal(patientHistory.json().followUps[0].notes, 'Return for cleaning.')
+    const patientPrescriptionImage = await dentistApp.inject({
+      url: `/api/me/prescriptions/${uploaded.json().prescriptionId}/image`,
+      headers: { cookie: patientCookie },
+    })
+    assert.equal(patientPrescriptionImage.statusCode, 200)
+    assert.deepEqual(patientPrescriptionImage.rawPayload, imageBytes)
 
     const completed = await dentistApp.inject({
       method: 'POST',
@@ -1487,6 +1538,19 @@ test('dentist staff can restore their staff session but cannot use reception end
     assert.equal(finishedPatients.json().patients.length, 0)
     const finishedDashboard = await dentistApp.inject({ url: '/api/dentist/dashboard', headers: { cookie } })
     assert.equal(finishedDashboard.json().appointments.length, 0)
+
+    dentistStore.appointments.push({
+      patientId: dentistStore.patient.id,
+      id: '30000000-0000-4000-8000-000000000003',
+      typeName: 'Future cleaning',
+      startsAt: '2030-01-02T02:00:00.000Z',
+      endsAt: '2030-01-02T03:00:00.000Z',
+      status: 'confirmed',
+      dentistId: dentistStore.dentist.id,
+      dentistName: dentistStore.dentist.displayName,
+    })
+    const futureDashboard = await dentistApp.inject({ url: '/api/dentist/dashboard', headers: { cookie } })
+    assert.equal(futureDashboard.json().upcomingAppointments[0].typeName, 'Future cleaning')
 
     const repeated = await dentistApp.inject({
       method: 'POST',

@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useState } from 'react'
-import { CalendarDays, FileCheck2, FileText, ReceiptText, ShieldCheck, Stethoscope } from 'lucide-react'
+import { CalendarClock, CalendarDays, FileCheck2, FileText, Pill, ReceiptText, ShieldCheck, Stethoscope } from 'lucide-react'
 import { api } from '../api'
 import { EmptyState, ErrorState, LoadingState } from '../components/PageState'
-import { formatCurrency, formatDate, titleCase } from '../format'
+import { formatCurrency, formatDate, formatDateTime, titleCase } from '../format'
 import { listFrom, recordView } from '../portalData'
 
 export default function RecordsPage() {
   const [records, setRecords] = useState([])
   const [charges, setCharges] = useState([])
+  const [prescriptions, setPrescriptions] = useState([])
+  const [followUps, setFollowUps] = useState([])
+  const [appointments, setAppointments] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -15,9 +18,16 @@ export default function RecordsPage() {
     setLoading(true)
     setError(null)
     try {
-      const [recordData, billingData] = await Promise.all([api.getRecords(), api.getBilling()])
+      const [recordData, billingData, appointmentData] = await Promise.all([
+        api.getRecords(),
+        api.getBilling(),
+        api.getAppointments('upcoming'),
+      ])
       setRecords(listFrom(recordData, 'records'))
       setCharges(listFrom(billingData, 'charges'))
+      setPrescriptions(listFrom(recordData, 'prescriptions'))
+      setFollowUps(listFrom(recordData, 'followUps'))
+      setAppointments(listFrom(appointmentData, 'appointments'))
     } catch (requestError) {
       setError(requestError)
     } finally {
@@ -58,7 +68,21 @@ export default function RecordsPage() {
 
     {loading ? <LoadingState label="Loading your history…" />
       : error ? <ErrorState error={error} onRetry={load} />
-        : history.length ? <section className="grid gap-5 xl:grid-cols-2" aria-label="Treatment and payment history">
+        : <div className="space-y-7">
+          {(appointments.length || followUps.length) && <section className="rounded-3xl bg-white p-5 soft-shadow sm:p-6" aria-label="Upcoming care">
+            <div className="flex items-center gap-3"><CalendarClock className="text-brand" size={21} /><div><h2 className="text-xl font-extrabold">Upcoming care</h2><p className="mt-1 text-xs text-ink/45">Confirmed clinic visits and dates recommended by your dentist.</p></div></div>
+            <div className="mt-5 grid gap-3 lg:grid-cols-2">
+              {appointments.map((appointment) => <article className="rounded-2xl bg-mint/45 p-4" key={`appointment-${appointment.id}`}><p className="text-[10px] font-extrabold uppercase tracking-[.14em] text-brand/60">Confirmed appointment</p><h3 className="mt-1 font-extrabold">{appointment.typeName}</h3><p className="mt-2 text-xs font-bold text-ink/50">{formatDateTime(appointment.startsAt)} · {appointment.dentistName}</p></article>)}
+              {followUps.map((item) => <article className="rounded-2xl bg-cream/80 p-4" key={`follow-up-${item.id}`}><p className="text-[10px] font-extrabold uppercase tracking-[.14em] text-ink/40">Dentist recommendation · {titleCase(item.status)}</p><h3 className="mt-1 font-extrabold">{item.serviceName || 'Follow-up visit'}</h3><p className="mt-2 text-xs font-bold text-ink/50">Recommended for {formatDate(item.recommendedOn)} · {item.dentistName}</p>{item.notes && <p className="mt-2 text-xs leading-5 text-ink/55">{item.notes}</p>}<p className="mt-2 text-[11px] text-ink/40">Reception will confirm the exact time.</p></article>)}
+            </div>
+          </section>}
+
+          {!!prescriptions.length && <section className="rounded-3xl bg-white p-5 soft-shadow sm:p-6" aria-label="Prescription history">
+            <div className="flex items-center gap-3"><Pill className="text-brand" size={21} /><div><h2 className="text-xl font-extrabold">Written prescriptions</h2><p className="mt-1 text-xs text-ink/45">Photos uploaded by your dentist are kept with your clinic history.</p></div></div>
+            <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{prescriptions.map((item) => <article className="overflow-hidden rounded-2xl border border-ink/8" key={item.id}><a href={`/api/me/prescriptions/${item.id}/image`} target="_blank" rel="noreferrer"><img alt="Written prescription" className="h-48 w-full bg-cream object-contain" src={`/api/me/prescriptions/${item.id}/image`} /></a><div className="p-4"><p className="text-sm font-extrabold">Written prescription</p><p className="mt-2 text-xs font-bold text-ink/40">{formatDate(item.prescribedOn)} · {item.dentistName}</p></div></article>)}</div>
+          </section>}
+
+          {history.length ? <section className="grid gap-5 xl:grid-cols-2" aria-label="Treatment and payment history">
           {history.map(({ key, record, charge, date }) => <article className="rounded-3xl bg-white p-5 soft-shadow sm:p-6" key={key}>
             <div className="flex items-start gap-4">
               <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-mint text-brand"><FileCheck2 size={22} /></div>
@@ -81,7 +105,9 @@ export default function RecordsPage() {
               {!!charge.payments.length && <div className="mt-4 space-y-2">{charge.payments.map((payment) => <div className="flex flex-wrap justify-between gap-2 text-xs text-ink/55" key={payment.id}><span>{formatDate(payment.receivedAt)} · {titleCase(payment.method)}</span><span className="font-extrabold">{formatCurrency(payment.amountCents)}</span></div>)}</div>}
             </div>}
           </article>)}
-        </section>
-          : <EmptyState icon={FileText} title="No history yet" message="Completed treatments and clinic-issued payment records will appear here." />}
+          </section> : !prescriptions.length && !followUps.length && !appointments.length
+            ? <EmptyState icon={FileText} title="No history yet" message="Completed treatments, prescriptions, follow-up recommendations, and payment records will appear here." />
+            : null}
+        </div>}
   </>
 }

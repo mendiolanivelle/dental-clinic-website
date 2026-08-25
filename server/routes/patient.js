@@ -207,10 +207,28 @@ export default async function patientRoutes(app, { store, config, now }) {
   )
 
   app.get('/api/me/records', { preHandler: app.authenticate }, async (request) => {
-    const records = await store.listRecords(request.patient.id)
+    const [records, prescriptions, followUps] = await Promise.all([
+      store.listRecords(request.patient.id),
+      store.listPatientPrescriptions(request.patient.id),
+      store.listPatientFollowUps(request.patient.id),
+    ])
     await audited(request, 'portal.records_listed')
-    return { records }
+    return { records, prescriptions, followUps }
   })
+
+  app.get(
+    '/api/me/prescriptions/:id/image',
+    { preHandler: app.authenticate, schema: { params: idParams } },
+    async (request, reply) => {
+      const image = await store.getPatientPrescriptionImage(request.patient.id, request.params.id)
+      if (!image) return reply.code(404).send(notFound)
+      await audited(request, 'portal.prescription_image_viewed', 'prescription', request.params.id)
+      return reply
+        .type(image.mimeType)
+        .header('content-disposition', `inline; filename="${image.originalName}"`)
+        .send(image.bytes)
+    },
+  )
 
   app.get('/api/me/billing', { preHandler: app.authenticate }, async (request) => {
     const charges = await store.listPatientBilling(request.patient.id)

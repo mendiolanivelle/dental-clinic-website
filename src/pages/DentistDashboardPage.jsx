@@ -3,16 +3,16 @@ import { AlertTriangle, CalendarDays, Clock3, Search, UsersRound } from 'lucide-
 import { Link, useOutletContext } from 'react-router-dom'
 import { api } from '../api'
 import { ErrorState, LoadingState } from '../components/PageState'
-import { formatTime, titleCase } from '../format'
+import { formatDateTime, formatTime, titleCase } from '../format'
 
 export default function DentistDashboardPage() {
   const { staff } = useOutletContext()
-  const [state, setState] = useState({ loading: true, appointments: [], error: null })
+  const [state, setState] = useState({ loading: true, appointments: [], upcomingAppointments: [], error: null })
   const load = useCallback(() => {
-    setState({ loading: true, appointments: [], error: null })
+    setState({ loading: true, appointments: [], upcomingAppointments: [], error: null })
     api.getDentistDashboard()
-      .then(({ appointments = [] }) => setState({ loading: false, appointments, error: null }))
-      .catch((error) => setState({ loading: false, appointments: [], error }))
+      .then(({ appointments = [], upcomingAppointments = [] }) => setState({ loading: false, appointments, upcomingAppointments, error: null }))
+      .catch((error) => setState({ loading: false, appointments: [], upcomingAppointments: [], error }))
   }, [])
   useEffect(load, [load])
 
@@ -66,6 +66,11 @@ export default function DentistDashboardPage() {
           </Link>
         })}
       </div> : <div className="mt-5 flex items-center gap-3 rounded-2xl bg-cream/70 p-4 text-sm text-ink/50"><UsersRound size={19} /> No assigned appointments today.</div>}
+    </section>
+
+    <section className="mt-8 rounded-3xl bg-white p-5 soft-shadow sm:p-6">
+      <div><p className="text-xs font-extrabold uppercase tracking-[.16em] text-brand/60">Future schedule</p><h2 className="mt-1 text-xl font-extrabold">Confirmed upcoming visits</h2><p className="mt-1 text-xs text-ink/45">These occupied times are blocked automatically from new bookings.</p></div>
+      {state.upcomingAppointments.length ? <div className="mt-5 divide-y divide-ink/8">{state.upcomingAppointments.map((appointment) => <Link className="flex flex-col gap-2 py-4 first:pt-0 hover:text-brand sm:flex-row sm:items-center" key={appointment.id} to={`/dentist/patients/${appointment.patient.id}`}><p className="w-56 text-sm font-extrabold text-brand">{formatDateTime(appointment.startsAt)}</p><div className="min-w-0 flex-1"><p className="font-extrabold">{appointment.patient.displayName}</p><p className="mt-1 text-xs text-ink/45">{appointment.typeName} · {appointment.patient.patientNumber}</p></div></Link>)}</div> : <div className="mt-5 flex items-center gap-3 rounded-2xl bg-cream/70 p-4 text-sm text-ink/50"><CalendarDays size={19} /> No future confirmed appointments.</div>}
     </section>
   </>
 }

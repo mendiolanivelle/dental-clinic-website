@@ -311,6 +311,36 @@ export function createStore(db) {
     return result.rows.map(recordFromRow)
   }
 
+  const listPatientPrescriptions = async (patientId) => {
+    const result = await db.query(
+      `SELECT rx.id, rx.patient_id, d.display_name AS dentist_name,
+              rx.prescribed_on, rx.generic_name, rx.instructions,
+              rx.image_mime_type, rx.image_original_name,
+              rx.image_byte_size, rx.created_at
+       FROM prescriptions rx
+       JOIN dentists d ON d.id = rx.dentist_id
+       WHERE rx.patient_id = $1
+       ORDER BY rx.prescribed_on DESC, rx.created_at DESC`,
+      [patientId],
+    )
+    return result.rows.map(prescriptionFromRow)
+  }
+
+  const listPatientFollowUps = async (patientId) => {
+    const result = await db.query(
+      `SELECT f.id, f.patient_id, d.display_name AS dentist_name,
+              t.name AS service_name, f.recommended_on, f.notes,
+              f.status, f.created_at
+       FROM follow_up_recommendations f
+       JOIN dentists d ON d.id = f.dentist_id
+       LEFT JOIN appointment_types t ON t.id = f.appointment_type_id
+       WHERE f.patient_id = $1
+       ORDER BY f.recommended_on DESC, f.created_at DESC`,
+      [patientId],
+    )
+    return result.rows.map(followUpFromRow)
+  }
+
   const getTreatmentPlan = async (patientId) => {
     const result = await db.query(
       `${treatmentPlanSelect}
@@ -742,6 +772,8 @@ export function createStore(db) {
     listAvailability,
     listAppointments,
     listRecords,
+    listPatientPrescriptions,
+    listPatientFollowUps,
     getTreatmentPlan,
 
     async getAdminAnalytics({ from, to, comparison, dentistId, serviceId, now }) {
@@ -967,8 +999,8 @@ export function createStore(db) {
       return result.rowCount ? result.rows[0].phone_e164 : null
     },
 
-    async getDentistDashboard(dentistId, date) {
-      const result = await db.query(
+    async getDentistDashboard(dentistId, date, now) {
+      const [todayResult, upcomingResult] = await Promise.all([db.query(
         `SELECT a.id, t.name AS type_name, a.starts_at, a.ends_at, a.status,
                 p.id AS patient_id, p.display_name, p.patient_number,
                 p.phone_e164, p.age, p.gender, p.weight_kg,
@@ -984,16 +1016,36 @@ export function createStore(db) {
            AND a.dentist_done_at IS NULL
          ORDER BY a.starts_at ASC`,
         [dentistId, date],
-      )
+      ), db.query(
+        `SELECT a.id, t.name AS type_name, a.starts_at, a.ends_at, a.status,
+                p.id AS patient_id, p.display_name, p.patient_number,
+                p.phone_e164, p.age, p.gender, p.weight_kg,
+                p.blood_pressure_systolic, p.blood_pressure_diastolic,
+                p.allergies, p.medical_conditions, p.current_medications,
+                p.medical_history_reviewed_at
+         FROM appointments a
+         JOIN appointment_types t ON t.id = a.appointment_type_id
+         JOIN patients p ON p.id = a.patient_id
+         WHERE a.dentist_id = $1
+           AND a.starts_at > $2
+           AND (a.starts_at AT TIME ZONE 'Asia/Manila')::date > $3::date
+           AND a.status IN ('scheduled', 'confirmed')
+           AND a.dentist_done_at IS NULL
+         ORDER BY a.starts_at ASC
+         LIMIT 100`,
+        [dentistId, now, date],
+      )])
+      const mapAppointment = (row) => ({
+        id: row.id,
+        typeName: row.type_name,
+        startsAt: row.starts_at,
+        endsAt: row.ends_at,
+        status: row.status,
+        patient: dentistPatientFromRow({ ...row, id: row.patient_id }),
+      })
       return {
-        appointments: result.rows.map((row) => ({
-          id: row.id,
-          typeName: row.type_name,
-          startsAt: row.starts_at,
-          endsAt: row.ends_at,
-          status: row.status,
-          patient: dentistPatientFromRow({ ...row, id: row.patient_id }),
-        })),
+        appointments: todayResult.rows.map(mapAppointment),
+        upcomingAppointments: upcomingResult.rows.map(mapAppointment),
       }
     },
 
@@ -1246,6 +1298,21 @@ export function createStore(db) {
              OR EXISTS (SELECT 1 FROM clinical_records r WHERE r.patient_id = rx.patient_id AND r.dentist_id = $1)
            )`,
         [dentistId, prescriptionId],
+      )
+      if (!result.rowCount) return null
+      return {
+        mimeType: result.rows[0].image_mime_type,
+        originalName: result.rows[0].image_original_name,
+        bytes: result.rows[0].image_bytes,
+      }
+    },
+
+    async getPatientPrescriptionImage(patientId, prescriptionId) {
+      const result = await db.query(
+        `SELECT image_mime_type, image_original_name, image_bytes
+         FROM prescriptions
+         WHERE id = $2 AND patient_id = $1`,
+        [patientId, prescriptionId],
       )
       if (!result.rowCount) return null
       return {
