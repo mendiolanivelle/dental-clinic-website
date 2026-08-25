@@ -149,8 +149,8 @@ export default function ReceptionPatientsPage() {
             <input id="new-patient-name" className="input-field" value={createName} onChange={(event) => setCreateName(event.target.value)} placeholder="First Middle Last" required />
           </div>
           <div>
-            <label className="mb-2 block text-sm font-extrabold" htmlFor="new-patient-phone">Phone <span className="font-normal text-ink/40">(optional)</span></label>
-            <input id="new-patient-phone" className="input-field" type="tel" value={createPhone} onChange={(event) => setCreatePhone(event.target.value)} placeholder="+63 9XX XXX XXXX" />
+            <label className="mb-2 block text-sm font-extrabold" htmlFor="new-patient-phone">Phone</label>
+            <input id="new-patient-phone" className="input-field" type="tel" autoComplete="tel" required value={createPhone} onChange={(event) => setCreatePhone(event.target.value)} placeholder="+63 9XX XXX XXXX" />
           </div>
           <div>
             <label className="mb-2 block text-sm font-extrabold" htmlFor="new-patient-age">Age</label>

@@ -496,10 +496,10 @@ export default async function staffRoutes(
         body: {
           type: 'object',
           additionalProperties: false,
-          required: ['displayName', 'age', 'gender'],
+          required: ['displayName', 'phone', 'age', 'gender'],
           properties: {
             displayName: { type: 'string', minLength: 2, maxLength: 160 },
-            phone: { type: 'string', maxLength: 32, pattern: '^[+0-9 ()-]*$' },
+            phone: { type: 'string', minLength: 1, maxLength: 32, pattern: '^[+0-9 ()-]*$' },
             age: { type: 'integer', minimum: 0, maximum: 130 },
             gender: {
               type: 'string',
@@ -515,7 +515,7 @@ export default async function staffRoutes(
       const submittedPhone = request.body.phone?.trim() || ''
       const phoneDigits = submittedPhone ? normalizePhone(submittedPhone) : ''
       const phoneE164 = phoneDigits ? `+${phoneDigits}` : null
-      if (!normalizedName || (submittedPhone && !phoneDigits)) {
+      if (!normalizedName || !phoneDigits) {
         return reply.code(400).send({
           error: { code: 'INVALID_REQUEST', message: 'Enter a full name and a valid Philippine mobile number.' },
         })

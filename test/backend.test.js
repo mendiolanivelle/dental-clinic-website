@@ -1172,6 +1172,14 @@ test('reception staff use a separate protected session and can confirm booking r
     assert.equal(missingPatients.statusCode, 200)
     assert.deepEqual(missingPatients.json().patients, [])
 
+    const missingPhone = await staffApp.inject({
+      method: 'POST',
+      url: '/api/staff/patients',
+      headers: { origin: config.publicOrigin, cookie },
+      payload: { displayName: 'No Phone Patient', age: 34, gender: 'male' },
+    })
+    assert.equal(missingPhone.statusCode, 400)
+
     const unsupportedGender = await staffApp.inject({
       method: 'POST',
       url: '/api/staff/patients',
