@@ -134,6 +134,36 @@ The deployed container must also pass:
 curl --fail http://127.0.0.1:3000/api/health
 ```
 
+## Automatic Facebook publishing
+
+Dentists can open **Facebook posts**, upload a photo, describe the post, and
+confirm once. A database-backed worker then validates the image and consent,
+generates the caption, applies exact clinic branding, and publishes to the
+connected Facebook Page. There is no second approval screen. Unsafe content
+fails closed and appears as blocked in the dentist and super-admin histories.
+
+The super admin must first open **Facebook publishing** and configure the brand,
+Page, limits, and allowed Manila publishing hours. Patient posts are disabled by
+default and require a selected patient plus specific public-social-media and AI
+processing consent. Clinical and patient images do not receive generative edits.
+
+Add these server-only Coolify variables before enabling the feature:
+
+```text
+OPENAI_API_KEY=<server-only OpenAI project key>
+OPENAI_TEXT_MODEL=gpt-5-mini
+OPENAI_IMAGE_MODEL=gpt-image-2
+SOCIAL_TOKEN_ENCRYPTION_KEY=<output of: openssl rand -base64 32>
+META_GRAPH_VERSION=v25.0
+```
+
+The existing private Google Drive service account and folder are reused for
+original, branded, and logo images. The Facebook Page connection expects a Page
+ID and Page access token with permission to publish Page posts. Facebook
+passwords must never be entered or stored. Test with a non-production Page and
+keep automatic publishing disabled until OpenAI, Drive, branding, consent policy,
+and Page permissions have all been verified.
+
 ## Supabase and Coolify deployment
 
 1. In Supabase, use the Supavisor **session mode** connection on port `5432`.

@@ -353,10 +353,11 @@ class MemoryStore {
     }
   }
 
-  async searchDentistPatients(dentistId, query) {
+  async searchDentistPatients(dentistId, query, now) {
     const assigned = this.appointments.some((appointment) =>
       appointment.patientId === this.patient.id && appointment.dentistId === dentistId &&
-      ['scheduled', 'confirmed'].includes(appointment.status) && !appointment.dentistDoneAt)
+      ['scheduled', 'confirmed'].includes(appointment.status) && !appointment.dentistDoneAt &&
+      appointment.startsAt.slice(0, 10) <= new Date(now.getTime() + 8 * 60 * 60_000).toISOString().slice(0, 10))
     if (!assigned || !this.patient.displayName.toLowerCase().includes(query.toLowerCase())) return []
     return [{ ...this.patient, age: 29, gender: 'female', allergies: 'Penicillin' }]
   }
@@ -390,16 +391,20 @@ class MemoryStore {
     if (input.followUp?.appointmentTypeId && !this.services.some(({ id }) => id === input.followUp.appointmentTypeId)) {
       return { outcome: 'invalid_service' }
     }
+    if (input.followUp) {
+      const scheduled = await this.createReceptionAppointment({
+        patientId: input.patientId,
+        dentistId: input.dentistId,
+        appointmentTypeId: input.followUp.appointmentTypeId,
+        startsAt: input.followUp.startsAt,
+        now: input.now,
+      })
+      if (scheduled.outcome !== 'created') return scheduled
+    }
     if (input.prescription) {
       this.prescriptions.push({
         id: 'a0000000-0000-4000-8000-000000000002', patientId: input.patientId,
         dentistName: this.dentist.displayName, ...input.prescription,
-      })
-    }
-    if (input.followUp) {
-      this.followUps.push({
-        id: 'b0000000-0000-4000-8000-000000000002', patientId: input.patientId,
-        status: 'pending', ...input.followUp,
       })
     }
     appointment.dentistDoneAt = input.now
@@ -447,10 +452,8 @@ class MemoryStore {
   }
 
   async createDentistFollowUp(input) {
-    if (!await this.getDentistPatient(input.dentistId, input.patientId)) return null
-    const id = 'b0000000-0000-4000-8000-000000000001'
-    this.followUps.push({ id, patientId: input.patientId, recommendedOn: input.recommendedOn, notes: input.notes, status: 'pending' })
-    return id
+    if (!await this.getDentistPatient(input.dentistId, input.patientId)) return { outcome: 'not_found' }
+    return this.createReceptionAppointment(input)
   }
 
   async listReceptionRequests() {
@@ -502,7 +505,7 @@ class MemoryStore {
       new Date(item.startsAt) < end && new Date(item.endsAt) > start)
     if (!patient || !dentist || !service || !valid || overlaps) return { outcome: 'slot_unavailable' }
     const appointment = {
-      id: '32000000-0000-4000-8000-000000000001',
+      id: `32000000-0000-4000-8000-${String(this.appointments.length + 1).padStart(12, '0')}`,
       patientId: patient.id,
       typeName: service.name,
       startsAt: start.toISOString(),
@@ -1250,6 +1253,14 @@ test('reception staff use a separate protected session and can confirm booking r
     assert.equal(staffStore.appointments.at(-1).endsAt, '2030-01-03T03:00:00.000Z')
     assert.equal(staffStore.appointments.at(-1).dentistName, 'Dr. Marco Reyes')
 
+    const receptionAvailability = await staffApp.inject({
+      url: '/api/staff/availability?date=2030-01-04',
+      headers: { cookie },
+    })
+    assert.equal(receptionAvailability.statusCode, 200)
+    assert.equal(receptionAvailability.json().slots.length, 8)
+    assert.equal(receptionAvailability.json().slots.some(({ available }) => available), true)
+
     const conflictingWalkIn = await staffApp.inject({
       method: 'POST',
       url: '/api/staff/appointments',
@@ -1515,18 +1526,28 @@ test('dentist staff can restore their staff session but cannot use reception end
     })
     assert.equal(rejectedOversizedImage.statusCode, 400)
 
+    const dentistAvailability = await dentistApp.inject({
+      url: '/api/dentist/availability?date=2030-01-02',
+      headers: { cookie },
+    })
+    assert.equal(dentistAvailability.statusCode, 200)
+    assert.equal(dentistAvailability.json().slots.length, 8)
+    assert.equal(dentistAvailability.json().slots.every(({ dentistId }) => dentistId === dentistStore.dentist.id), true)
+
     const followUp = await dentistApp.inject({
       method: 'POST',
       url: `/api/dentist/patients/${dentistStore.patient.id}/follow-ups`,
       headers: { origin: config.publicOrigin, cookie },
       payload: {
-        recommendedOn: '2030-01-02',
+        startsAt: '2030-01-02T01:00:00.000Z',
         appointmentTypeId: dentistStore.services[0].id,
         notes: 'Return for cleaning.',
       },
     })
     assert.equal(followUp.statusCode, 201)
-    assert.equal(dentistStore.followUps[0].notes, 'Return for cleaning.')
+    const scheduledFollowUp = dentistStore.appointments.find(({ id }) => id === followUp.json().appointmentId)
+    assert.equal(scheduledFollowUp.status, 'confirmed')
+    assert.equal(scheduledFollowUp.startsAt, '2030-01-02T01:00:00.000Z')
 
     const patientLogin = await dentistApp.inject({
       method: 'POST',
@@ -1538,7 +1559,8 @@ test('dentist staff can restore their staff session but cannot use reception end
     const patientHistory = await dentistApp.inject({ url: '/api/me/records', headers: { cookie: patientCookie } })
     assert.equal(patientHistory.statusCode, 200)
     assert.equal(patientHistory.json().prescriptions[0].id, uploaded.json().prescriptionId)
-    assert.equal(patientHistory.json().followUps[0].notes, 'Return for cleaning.')
+    const patientUpcoming = await dentistApp.inject({ url: '/api/me/appointments?scope=upcoming', headers: { cookie: patientCookie } })
+    assert.equal(patientUpcoming.json().appointments.some(({ id }) => id === followUp.json().appointmentId), true)
     const patientPrescriptionImage = await dentistApp.inject({
       url: `/api/me/prescriptions/${uploaded.json().prescriptionId}/image`,
       headers: { cookie: patientCookie },
@@ -1550,11 +1572,20 @@ test('dentist staff can restore their staff session but cannot use reception end
       method: 'POST',
       url: `/api/dentist/patients/${dentistStore.patient.id}/appointments/${dentistStore.appointments[0].id}/complete`,
       headers: { origin: config.publicOrigin, cookie },
-      payload: { proposedFeeCents: 175000, prescription: null, followUp: null },
+      payload: {
+        proposedFeeCents: 175000,
+        prescription: null,
+        followUp: {
+          startsAt: '2030-01-02T03:00:00.000Z',
+          appointmentTypeId: dentistStore.services[1].id,
+          notes: 'Confirmed during visit completion.',
+        },
+      },
     })
     assert.equal(completed.statusCode, 200, completed.body)
     assert.equal(dentistStore.appointments[0].proposedFeeCents, 175000)
     assert.ok(dentistStore.appointments[0].dentistDoneAt)
+    assert.equal(dentistStore.appointments.some(({ startsAt, status }) => startsAt === '2030-01-02T03:00:00.000Z' && status === 'confirmed'), true)
 
     const finishedPatients = await dentistApp.inject({ url: '/api/dentist/patients?q=', headers: { cookie } })
     assert.equal(finishedPatients.statusCode, 200)
@@ -1573,7 +1604,7 @@ test('dentist staff can restore their staff session but cannot use reception end
       dentistName: dentistStore.dentist.displayName,
     })
     const futureDashboard = await dentistApp.inject({ url: '/api/dentist/dashboard', headers: { cookie } })
-    assert.equal(futureDashboard.json().upcomingAppointments[0].typeName, 'Future cleaning')
+    assert.equal(futureDashboard.json().upcomingAppointments.some(({ typeName }) => typeName === 'Future cleaning'), true)
 
     const repeated = await dentistApp.inject({
       method: 'POST',

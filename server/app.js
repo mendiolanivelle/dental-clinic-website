@@ -19,6 +19,7 @@ import dentistRoutes from './routes/dentist.js'
 import adminRoutes from './routes/admin.js'
 import { createStaffCredentialVerifier } from './staff-auth.js'
 import { createGoogleDriveStorage } from './google-drive.js'
+import { createSocialPublisher } from './social-publishing.js'
 
 const defaultStaticDirectory = fileURLToPath(new URL('../dist/', import.meta.url))
 const stateChangingMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
@@ -34,6 +35,8 @@ export async function buildApp({
   logger = config.nodeEnv !== 'test',
   verifyStaffCredentials,
   prescriptionStorage,
+  socialStorage,
+  socialPublisher,
 } = {}) {
   const app = Fastify({
     ajv: {
@@ -65,6 +68,10 @@ export async function buildApp({
     store = createStore(ownedDatabase)
   }
   prescriptionStorage ??= createGoogleDriveStorage(config)
+  socialStorage ??= prescriptionStorage
+  if (!socialPublisher && socialStorage && typeof store.claimNextSocialPost === 'function') {
+    socialPublisher = createSocialPublisher({ config, store, storage: socialStorage, now })
+  }
 
   await app.register(cookie)
   await app.register(helmet, {
@@ -170,14 +177,20 @@ export async function buildApp({
     verifyStaffCredentials:
       verifyStaffCredentials || createStaffCredentialVerifier(config),
   })
-  await app.register(dentistRoutes, { store, config, now, prescriptionStorage })
+  await app.register(dentistRoutes, {
+    store, config, now, prescriptionStorage, socialStorage, socialPublisher,
+  })
   await app.register(adminRoutes, {
     store,
     config,
     now,
     randomBytes: randomBytesFn,
     randomUUID: randomUUIDFn,
+    socialStorage,
+    socialPublisher,
   })
+
+  socialPublisher?.start?.()
 
   const hasStaticFiles = Boolean(staticDir && existsSync(path.join(staticDir, 'index.html')))
   if (hasStaticFiles) {
@@ -232,8 +245,11 @@ export async function buildApp({
 
   if (ownedDatabase) {
     app.addHook('onClose', async () => {
+      socialPublisher?.stop?.()
       await ownedDatabase.close()
     })
+  } else if (socialPublisher?.stop) {
+    app.addHook('onClose', async () => socialPublisher.stop())
   }
 
   return app

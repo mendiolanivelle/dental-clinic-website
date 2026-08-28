@@ -122,6 +122,59 @@ const adminStaffFromRow = (row) => ({
   lastLoginAt: row.last_login_at,
 })
 
+const socialSettingsFromRow = (row) => ({
+  clinicName: row.clinic_name,
+  primaryColor: row.primary_color,
+  secondaryColor: row.secondary_color,
+  fontFamily: row.font_family,
+  brandVoice: row.brand_voice,
+  defaultLanguage: row.default_language,
+  contactPhone: row.contact_phone,
+  address: row.address,
+  defaultCallToAction: row.default_call_to_action,
+  defaultHashtags: row.default_hashtags || [],
+  requiredDisclaimer: row.required_disclaimer,
+  prohibitedPhrases: row.prohibited_phrases || [],
+  patientPostsEnabled: row.patient_posts_enabled,
+  minorPostsEnabled: row.minor_posts_enabled,
+  automaticPublishingEnabled: row.automatic_publishing_enabled,
+  dailyPostLimit: row.daily_post_limit,
+  weeklyPostLimit: row.weekly_post_limit,
+  postingStartHour: row.posting_start_hour,
+  postingEndHour: row.posting_end_hour,
+  hasLogo: Boolean(row.logo_drive_file_id),
+  logoDriveFileId: row.logo_drive_file_id,
+  logoMimeType: row.logo_mime_type,
+  page: row.page_id ? {
+    id: row.page_id,
+    name: row.page_name,
+    status: row.connection_status,
+  } : null,
+})
+
+const socialPostFromRow = (row) => ({
+  id: row.id,
+  dentistId: row.dentist_id,
+  dentistName: row.dentist_name,
+  createdByStaffId: row.created_by_staff_id,
+  patientId: row.patient_id,
+  patientName: row.patient_name,
+  contentType: row.content_type,
+  description: row.original_description,
+  caption: row.generated_caption,
+  status: row.status,
+  blockingReason: row.blocking_reason,
+  externalPostId: row.external_post_id,
+  externalPostUrl: row.external_post_url,
+  retryCount: row.retry_count,
+  confirmedAt: row.confirmed_at,
+  publishedAt: row.published_at,
+  failedAt: row.failed_at,
+  removedAt: row.removed_at,
+  createdAt: row.created_at,
+  hasFinalImage: Boolean(row.final_image_drive_file_id),
+})
+
 const adminMetricsFromRow = (row) => {
   const netBilledCents = Number(row.net_billed_cents || 0)
   const completedChargedVisits = Number(row.completed_charged_visits || 0)
@@ -417,6 +470,62 @@ export function createStore(db) {
       [date, now],
     )
     return result.rows.map(availabilitySlotFromRow)
+  }
+
+  const createConfirmedAppointment = async (queryable, {
+    patientId, dentistId, appointmentTypeId, startsAt, patientInstructions = null, now,
+  }) => {
+    try {
+      const result = await queryable.query(
+        `INSERT INTO appointments (
+           patient_id, dentist_id, appointment_type_id, starts_at, ends_at,
+           status, patient_instructions, created_at, updated_at
+         )
+         SELECT p.id, d.id, t.id, $4::timestamptz,
+                $4::timestamptz + interval '1 hour', 'confirmed', $5, $6, $6
+         FROM patients p
+         CROSS JOIN dentists d
+         CROSS JOIN appointment_types t
+         WHERE p.id = $1
+           AND d.id = $2 AND d.active = true
+           AND EXISTS (
+             SELECT 1 FROM staff_profiles s
+             WHERE s.dentist_id = d.id AND s.role = 'dentist' AND s.active = true
+           )
+           AND t.id = $3
+           AND $4::timestamptz > $6
+           AND EXTRACT(ISODOW FROM $4::timestamptz AT TIME ZONE 'Asia/Manila') BETWEEN 1 AND 6
+           AND ($4::timestamptz AT TIME ZONE 'Asia/Manila')::time >= time '09:00'
+           AND ($4::timestamptz AT TIME ZONE 'Asia/Manila')::time < time '17:00'
+           AND EXTRACT(MINUTE FROM $4::timestamptz AT TIME ZONE 'Asia/Manila') = 0
+           AND EXTRACT(SECOND FROM $4::timestamptz AT TIME ZONE 'Asia/Manila') = 0
+           AND NOT EXISTS (
+             SELECT 1 FROM appointments a
+             WHERE (a.dentist_id = d.id OR a.patient_id = p.id)
+               AND a.status IN ('scheduled', 'confirmed')
+               AND a.starts_at < $4::timestamptz + interval '1 hour'
+               AND a.ends_at > $4::timestamptz
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM appointment_requests r
+             WHERE (r.dentist_id = d.id OR r.patient_id = p.id)
+               AND r.status IN ('requested', 'confirmed')
+               AND r.requested_start_at < $4::timestamptz + interval '1 hour'
+               AND r.requested_end_at > $4::timestamptz
+           )
+         ON CONFLICT (dentist_id, starts_at)
+           WHERE status IN ('scheduled', 'confirmed')
+           DO NOTHING
+         RETURNING id`,
+        [patientId, dentistId, appointmentTypeId, startsAt, patientInstructions, now],
+      )
+      return result.rowCount
+        ? { outcome: 'created', id: result.rows[0].id }
+        : { outcome: 'slot_unavailable' }
+    } catch (error) {
+      if (error.code === '23505') return { outcome: 'slot_unavailable' }
+      throw error
+    }
   }
 
   const loadCharges = async (queryable, whereSql, values, includeVoided = true, includeStaff = true) => {
@@ -988,6 +1097,352 @@ export function createStore(db) {
       }))
     },
 
+    async getSocialSettings() {
+      const result = await db.query(
+        `SELECT s.*, c.page_id, c.page_name, c.connection_status
+         FROM social_brand_settings s
+         LEFT JOIN social_page_connections c ON c.id = 1
+         WHERE s.id = 1`,
+      )
+      return socialSettingsFromRow(result.rows[0])
+    },
+
+    async updateSocialSettings(settings, now) {
+      const result = await db.query(
+        `UPDATE social_brand_settings SET
+           clinic_name = $1, primary_color = $2, secondary_color = $3,
+           brand_voice = $4, default_language = $5, contact_phone = $6,
+           address = $7, default_call_to_action = $8, default_hashtags = $9,
+           required_disclaimer = $10, prohibited_phrases = $11,
+           patient_posts_enabled = $12, minor_posts_enabled = $13,
+           automatic_publishing_enabled = $14, daily_post_limit = $15,
+           weekly_post_limit = $16, posting_start_hour = $17,
+           posting_end_hour = $18, font_family = $19,
+           logo_drive_file_id = coalesce($20, logo_drive_file_id),
+           logo_mime_type = coalesce($21, logo_mime_type), updated_at = $22
+         WHERE id = 1 RETURNING *`,
+        [
+          settings.clinicName, settings.primaryColor, settings.secondaryColor,
+          settings.brandVoice, settings.defaultLanguage, settings.contactPhone,
+          settings.address, settings.defaultCallToAction, settings.defaultHashtags,
+          settings.requiredDisclaimer, settings.prohibitedPhrases,
+          settings.patientPostsEnabled, settings.minorPostsEnabled,
+          settings.automaticPublishingEnabled, settings.dailyPostLimit,
+          settings.weeklyPostLimit, settings.postingStartHour, settings.postingEndHour,
+          settings.fontFamily,
+          settings.logoDriveFileId, settings.logoMimeType, now,
+        ],
+      )
+      return socialSettingsFromRow(result.rows[0])
+    },
+
+    async setSocialPageConnection({ pageId, pageName, encryptedAccessToken, staffId, now }) {
+      await db.query(
+        `INSERT INTO social_page_connections (
+           id, page_id, page_name, encrypted_access_token, connection_status,
+           connected_by_staff_id, connected_at, updated_at
+         ) VALUES (1, $1, $2, $3, 'connected', $4, $5, $5)
+         ON CONFLICT (id) DO UPDATE SET
+           page_id = excluded.page_id, page_name = excluded.page_name,
+           encrypted_access_token = excluded.encrypted_access_token,
+           connection_status = 'connected', connected_by_staff_id = excluded.connected_by_staff_id,
+           connected_at = excluded.connected_at, updated_at = excluded.updated_at`,
+        [pageId, pageName, encryptedAccessToken, staffId, now],
+      )
+    },
+
+    async disconnectSocialPage(now) {
+      await db.query(
+        `UPDATE social_page_connections
+         SET encrypted_access_token = NULL, connection_status = 'disconnected', updated_at = $1
+         WHERE id = 1`,
+        [now],
+      )
+    },
+
+    async createSocialPost({
+      dentistId, staffId, patientId, contentType, description, image,
+      idempotencyKey, consent, now,
+    }) {
+      return db.transaction(async (client) => {
+        if (patientId) {
+          const patient = await client.query(
+            `SELECT p.id, p.display_name
+             FROM patients p
+             WHERE p.id = $1 AND EXISTS (
+               SELECT 1 FROM appointments a
+               WHERE a.patient_id = p.id AND a.dentist_id = $2
+             )`,
+            [patientId, dentistId],
+          )
+          if (!patient.rowCount) return { outcome: 'patient_not_found' }
+        }
+        const inserted = await client.query(
+          `INSERT INTO social_posts (
+             dentist_id, created_by_staff_id, patient_id, content_type,
+             original_description, original_image_drive_file_id,
+             original_image_mime_type, original_image_name, original_image_sha256,
+             idempotency_key, confirmed_at, created_at, updated_at
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11, $11)
+           ON CONFLICT (idempotency_key) DO NOTHING
+           RETURNING id`,
+          [
+            dentistId, staffId, patientId, contentType, description,
+            image.driveFileId, image.mimeType, image.originalName, image.sha256,
+            idempotencyKey, now,
+          ],
+        )
+        if (!inserted.rowCount) {
+          const existing = await client.query('SELECT id FROM social_posts WHERE idempotency_key = $1', [idempotencyKey])
+          return { outcome: 'duplicate', id: existing.rows[0]?.id || null }
+        }
+        const id = inserted.rows[0].id
+        if (consent) {
+          await client.query(
+            `INSERT INTO social_post_consents (
+               social_post_id, patient_id, consent_evidence,
+               covers_public_social_media, covers_ai_processing, subject_is_minor,
+               guardian_name, granted_at, recorded_by_staff_id
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+            [
+              id, patientId, consent.evidence, consent.coversPublicSocialMedia,
+              consent.coversAiProcessing, consent.subjectIsMinor,
+              consent.guardianName, consent.grantedAt, staffId,
+            ],
+          )
+        }
+        await client.query(
+          `INSERT INTO social_post_events (
+             social_post_id, event_type, new_status, actor_type, actor_id
+           ) VALUES ($1, 'dentist_confirmed', 'confirmed', 'staff', $2)`,
+          [id, staffId],
+        )
+        return { outcome: 'created', id }
+      })
+    },
+
+    async listSocialPosts({ staffId = null, limit = 100 }) {
+      const result = await db.query(
+        `SELECT p.*, d.display_name AS dentist_name, patient.display_name AS patient_name
+         FROM social_posts p
+         JOIN dentists d ON d.id = p.dentist_id
+         LEFT JOIN patients patient ON patient.id = p.patient_id
+         WHERE ($1::uuid IS NULL OR p.created_by_staff_id = $1)
+         ORDER BY p.created_at DESC LIMIT $2`,
+        [staffId, limit],
+      )
+      return result.rows.map(socialPostFromRow)
+    },
+
+    async getSocialPostImage({ id, staffId = null }) {
+      const result = await db.query(
+        `SELECT coalesce(final_image_drive_file_id, original_image_drive_file_id) AS drive_file_id,
+                coalesce(final_image_mime_type, original_image_mime_type) AS mime_type
+         FROM social_posts
+         WHERE id = $1 AND ($2::uuid IS NULL OR created_by_staff_id = $2)`,
+        [id, staffId],
+      )
+      return result.rows[0] ? {
+        driveFileId: result.rows[0].drive_file_id,
+        mimeType: result.rows[0].mime_type,
+      } : null
+    },
+
+    async claimNextSocialPost(now) {
+      const claimed = await db.query(
+        `WITH candidate AS (
+           SELECT id FROM social_posts
+           WHERE external_post_id IS NULL
+             AND (
+               (status = 'confirmed' AND (next_attempt_at IS NULL OR next_attempt_at <= $1))
+               OR (status = 'failed' AND retry_count < 3 AND next_attempt_at <= $1)
+               OR (status IN ('ai_processing', 'branding', 'automatic_validation') AND locked_at < $1 - interval '15 minutes')
+             )
+           ORDER BY created_at ASC
+           FOR UPDATE SKIP LOCKED LIMIT 1
+         )
+         UPDATE social_posts p SET
+           status = 'ai_processing', locked_at = $1,
+           processing_started_at = coalesce(processing_started_at, $1), updated_at = $1
+         FROM candidate WHERE p.id = candidate.id RETURNING p.id`,
+        [now],
+      )
+      return claimed.rows[0]?.id || null
+    },
+
+    async getSocialPostForProcessing(id) {
+      const result = await db.query(
+        `SELECT p.*, p.id AS post_id, patient.display_name AS patient_name,
+                s.*, c.page_id, c.page_name, c.encrypted_access_token,
+                c.connection_status, consent.consent_evidence,
+                consent.covers_public_social_media, consent.covers_ai_processing,
+                consent.subject_is_minor, consent.guardian_name, consent.granted_at
+         FROM social_posts p
+         CROSS JOIN social_brand_settings s
+         LEFT JOIN social_page_connections c ON c.id = 1
+         LEFT JOIN social_post_consents consent ON consent.social_post_id = p.id
+         LEFT JOIN patients patient ON patient.id = p.patient_id
+         WHERE p.id = $1`,
+        [id],
+      )
+      const row = result.rows[0]
+      if (!row) return null
+      return {
+        id: row.post_id,
+        contentType: row.content_type,
+        description: row.original_description,
+        patientId: row.patient_id,
+        patientName: row.patient_name,
+        originalImage: {
+          driveFileId: row.original_image_drive_file_id,
+          mimeType: row.original_image_mime_type,
+        },
+        settings: socialSettingsFromRow(row),
+        connection: row.page_id ? {
+          pageId: row.page_id,
+          pageName: row.page_name,
+          encryptedAccessToken: row.encrypted_access_token,
+          status: row.connection_status,
+        } : null,
+        consent: row.consent_evidence ? {
+          evidence: row.consent_evidence,
+          coversPublicSocialMedia: row.covers_public_social_media,
+          coversAiProcessing: row.covers_ai_processing,
+          subjectIsMinor: row.subject_is_minor,
+          guardianName: row.guardian_name,
+          grantedAt: row.granted_at,
+        } : null,
+      }
+    },
+
+    async saveSocialPostGenerated({ id, caption, finalImage, now }) {
+      await db.transaction(async (client) => {
+        await client.query(
+          `UPDATE social_posts SET generated_caption = $2,
+             final_image_drive_file_id = $3, final_image_mime_type = $4,
+             status = 'automatic_validation', blocking_reason = NULL, updated_at = $5
+           WHERE id = $1`,
+          [id, caption, finalImage.driveFileId, finalImage.mimeType, now],
+        )
+        await client.query(
+          `INSERT INTO social_post_events (social_post_id, event_type, previous_status, new_status, actor_type)
+           VALUES ($1, 'content_generated', 'ai_processing', 'automatic_validation', 'system')`,
+          [id],
+        )
+      })
+    },
+
+    async canPublishSocialPost(now) {
+      const result = await db.query(
+        `SELECT s.automatic_publishing_enabled, s.daily_post_limit, s.weekly_post_limit,
+                s.posting_start_hour, s.posting_end_hour,
+                extract(hour FROM $1 AT TIME ZONE 'Asia/Manila')::integer AS current_hour,
+                count(p.id) FILTER (
+                  WHERE p.published_at >= date_trunc('day', $1 AT TIME ZONE 'Asia/Manila') AT TIME ZONE 'Asia/Manila'
+                ) AS daily_count,
+                count(p.id) FILTER (
+                  WHERE p.published_at >= date_trunc('week', $1 AT TIME ZONE 'Asia/Manila') AT TIME ZONE 'Asia/Manila'
+                ) AS weekly_count
+         FROM social_brand_settings s
+         LEFT JOIN social_posts p ON p.status = 'published'
+         WHERE s.id = 1
+         GROUP BY s.id`,
+        [now],
+      )
+      const row = result.rows[0]
+      if (!row.automatic_publishing_enabled) return { allowed: false, reason: 'Automatic publishing is disabled by the super admin.' }
+      const insideHours = row.posting_start_hour < row.posting_end_hour
+        ? row.current_hour >= row.posting_start_hour && row.current_hour < row.posting_end_hour
+        : row.current_hour >= row.posting_start_hour || row.current_hour < row.posting_end_hour
+      if (!insideHours) {
+        const waitHours = (row.posting_start_hour - row.current_hour + 24) % 24 || 24
+        const retryAt = new Date(now)
+        retryAt.setUTCMinutes(0, 0, 0)
+        retryAt.setUTCHours(retryAt.getUTCHours() + waitHours)
+        return { allowed: false, reason: 'Waiting for the clinic’s allowed Facebook publishing hours.', retryAt }
+      }
+      if (Number(row.daily_count) >= row.daily_post_limit) return { allowed: false, reason: 'The daily Facebook post limit has been reached.' }
+      if (Number(row.weekly_count) >= row.weekly_post_limit) return { allowed: false, reason: 'The weekly Facebook post limit has been reached.' }
+      return { allowed: true }
+    },
+
+    async markSocialPostPublishing(id, now) {
+      await db.query(
+        `UPDATE social_posts SET status = 'publishing', locked_at = $2, updated_at = $2 WHERE id = $1`,
+        [id, now],
+      )
+    },
+
+    async deferSocialPost(id, reason, retryAt, now) {
+      await db.query(
+        `UPDATE social_posts SET status = 'confirmed', blocking_reason = $2,
+           next_attempt_at = $3, locked_at = NULL, updated_at = $4 WHERE id = $1`,
+        [id, reason, retryAt, now],
+      )
+    },
+
+    async markSocialPostPublished({ id, externalPostId, externalPostUrl, now }) {
+      await db.transaction(async (client) => {
+        await client.query(
+          `UPDATE social_posts SET status = 'published', external_post_id = $2,
+             external_post_url = $3, published_at = $4, locked_at = NULL,
+             next_attempt_at = NULL, updated_at = $4 WHERE id = $1`,
+          [id, externalPostId, externalPostUrl, now],
+        )
+        await client.query(
+          `INSERT INTO social_post_events (social_post_id, event_type, previous_status, new_status, actor_type, details)
+           VALUES ($1, 'facebook_published', 'publishing', 'published', 'provider', jsonb_build_object('externalPostId', $2))`,
+          [id, externalPostId],
+        )
+      })
+    },
+
+    async markSocialPostBlocked(id, reason, now) {
+      await db.query(
+        `UPDATE social_posts SET status = 'blocked', blocking_reason = $2,
+           locked_at = NULL, next_attempt_at = NULL, failed_at = $3, updated_at = $3
+         WHERE id = $1`,
+        [id, reason, now],
+      )
+      await db.query(
+        `INSERT INTO social_post_events (social_post_id, event_type, new_status, actor_type, details)
+         VALUES ($1, 'automatic_validation_blocked', 'blocked', 'system', jsonb_build_object('reason', $2))`,
+        [id, reason],
+      )
+    },
+
+    async markSocialPostFailed(id, reason, retryAt, now) {
+      await db.query(
+        `UPDATE social_posts SET status = 'failed', blocking_reason = $2,
+           retry_count = retry_count + 1, next_attempt_at = $3,
+           locked_at = NULL, failed_at = $4, updated_at = $4 WHERE id = $1`,
+        [id, reason, retryAt, now],
+      )
+    },
+
+    async markSocialPostRemoved(id, now) {
+      const result = await db.query(
+        `UPDATE social_posts SET status = 'removed', removed_at = $2, updated_at = $2
+         WHERE id = $1 AND status = 'published' RETURNING id`,
+        [id, now],
+      )
+      return Boolean(result.rowCount)
+    },
+
+    async getPublishedSocialPost(id) {
+      const result = await db.query(
+        `SELECT p.id, p.external_post_id, c.encrypted_access_token
+         FROM social_posts p CROSS JOIN social_page_connections c
+         WHERE p.id = $1 AND p.status = 'published' AND c.id = 1 AND c.connection_status = 'connected'`,
+        [id],
+      )
+      return result.rows[0] ? {
+        id: result.rows[0].id,
+        externalPostId: result.rows[0].external_post_id,
+        encryptedAccessToken: result.rows[0].encrypted_access_token,
+      } : null
+    },
+
     async updatePatientPhone(patientId, phoneE164, now) {
       const result = await db.query(
         `UPDATE patients
@@ -1049,7 +1504,7 @@ export function createStore(db) {
       }
     },
 
-    async searchDentistPatients(dentistId, query) {
+    async searchDentistPatients(dentistId, query, now) {
       const result = await db.query(
         `SELECT p.id, p.display_name, p.patient_number, p.phone_e164, p.age, p.gender,
                 p.weight_kg, p.blood_pressure_systolic, p.blood_pressure_diastolic,
@@ -1062,6 +1517,8 @@ export function createStore(db) {
                AND a.dentist_id = $1
                AND a.status IN ('scheduled', 'confirmed')
                AND a.dentist_done_at IS NULL
+               AND (a.starts_at AT TIME ZONE 'Asia/Manila')::date <=
+                   ($3::timestamptz AT TIME ZONE 'Asia/Manila')::date
            )
            AND (
              position(lower($2) in lower(p.display_name)) > 0
@@ -1069,6 +1526,25 @@ export function createStore(db) {
            )
          ORDER BY p.display_name ASC
          LIMIT 100`,
+        [dentistId, query, now],
+      )
+      return result.rows.map(dentistPatientFromRow)
+    },
+
+    async searchDentistSocialPatients(dentistId, query) {
+      const result = await db.query(
+        `SELECT p.id, p.display_name, p.patient_number, p.phone_e164, p.age, p.gender,
+                p.weight_kg, p.blood_pressure_systolic, p.blood_pressure_diastolic,
+                p.allergies, p.medical_conditions, p.current_medications,
+                p.medical_history_reviewed_at
+         FROM patients p
+         WHERE EXISTS (
+           SELECT 1 FROM appointments a WHERE a.patient_id = p.id AND a.dentist_id = $1
+         ) AND (
+           position(lower($2) in lower(p.display_name)) > 0
+           OR position(upper($2) in p.patient_number) > 0
+         )
+         ORDER BY p.display_name ASC LIMIT 100`,
         [dentistId, query],
       )
       return result.rows.map(dentistPatientFromRow)
@@ -1195,6 +1671,20 @@ export function createStore(db) {
           if (!service.rowCount) return { outcome: 'invalid_service' }
         }
 
+        let followUpAppointmentId = null
+        if (followUp) {
+          const scheduled = await createConfirmedAppointment(client, {
+            patientId,
+            dentistId,
+            appointmentTypeId: followUp.appointmentTypeId,
+            startsAt: followUp.startsAt,
+            patientInstructions: followUp.notes,
+            now,
+          })
+          if (scheduled.outcome !== 'created') return scheduled
+          followUpAppointmentId = scheduled.id
+        }
+
         let prescriptionId = null
         if (prescription) {
           const inserted = await client.query(
@@ -1216,19 +1706,6 @@ export function createStore(db) {
           prescriptionId = inserted.rows[0].id
         }
 
-        let followUpId = null
-        if (followUp) {
-          const inserted = await client.query(
-            `INSERT INTO follow_up_recommendations (
-               patient_id, dentist_id, appointment_type_id, created_by_staff_id,
-               recommended_on, notes, status, created_at, updated_at
-             ) VALUES ($1, $2, $3, $4, $5::date, $6, 'pending', $7, $7)
-             RETURNING id`,
-            [patientId, dentistId, followUp.appointmentTypeId, staffId, followUp.recommendedOn, followUp.notes, now],
-          )
-          followUpId = inserted.rows[0].id
-        }
-
         await client.query(
           `UPDATE appointments
            SET dentist_done_at = $2,
@@ -1238,7 +1715,7 @@ export function createStore(db) {
            WHERE id = $1`,
           [appointmentId, now, staffId, proposedFeeCents],
         )
-        return { outcome: 'completed', prescriptionId, followUpId }
+        return { outcome: 'completed', prescriptionId, followUpAppointmentId }
       })
     },
 
@@ -1332,32 +1809,27 @@ export function createStore(db) {
 
     async createDentistFollowUp({
       dentistId,
-      staffId,
       patientId,
       appointmentTypeId,
-      recommendedOn,
+      startsAt,
       notes,
       now,
     }) {
-      const result = await db.query(
-        `INSERT INTO follow_up_recommendations (
-           patient_id, dentist_id, appointment_type_id, created_by_staff_id,
-           recommended_on, notes, created_at, updated_at
-         )
-         SELECT p.id, $1, $4, $2, $5::date, $6, $7, $7
-         FROM patients p
-         WHERE p.id = $3
-           AND ($4::uuid IS NULL OR EXISTS (SELECT 1 FROM appointment_types t WHERE t.id = $4))
+      const access = await db.query(
+        `SELECT 1 FROM patients p
+         WHERE p.id = $1
            AND (
-             EXISTS (SELECT 1 FROM appointments a WHERE a.patient_id = p.id AND a.dentist_id = $1)
-             OR EXISTS (SELECT 1 FROM clinical_records r WHERE r.patient_id = p.id AND r.dentist_id = $1)
-             OR EXISTS (SELECT 1 FROM prescriptions rx WHERE rx.patient_id = p.id AND rx.dentist_id = $1)
-             OR EXISTS (SELECT 1 FROM follow_up_recommendations f WHERE f.patient_id = p.id AND f.dentist_id = $1)
-           )
-         RETURNING id`,
-        [dentistId, staffId, patientId, appointmentTypeId, recommendedOn, notes, now],
+             EXISTS (SELECT 1 FROM appointments a WHERE a.patient_id = p.id AND a.dentist_id = $2)
+             OR EXISTS (SELECT 1 FROM clinical_records r WHERE r.patient_id = p.id AND r.dentist_id = $2)
+             OR EXISTS (SELECT 1 FROM prescriptions rx WHERE rx.patient_id = p.id AND rx.dentist_id = $2)
+             OR EXISTS (SELECT 1 FROM follow_up_recommendations f WHERE f.patient_id = p.id AND f.dentist_id = $2)
+           )`,
+        [patientId, dentistId],
       )
-      return result.rowCount ? result.rows[0].id : null
+      if (!access.rowCount) return { outcome: 'not_found' }
+      return createConfirmedAppointment(db, {
+        patientId, dentistId, appointmentTypeId, startsAt, patientInstructions: notes, now,
+      })
     },
 
     async listPatientBilling(patientId) {
@@ -1454,57 +1926,7 @@ export function createStore(db) {
     },
 
     async createReceptionAppointment({ patientId, dentistId, appointmentTypeId, startsAt, now }) {
-      try {
-        const result = await db.query(
-          `INSERT INTO appointments (
-             patient_id, dentist_id, appointment_type_id, starts_at, ends_at,
-             status, created_at, updated_at
-           )
-           SELECT p.id, d.id, t.id, $4::timestamptz,
-                  $4::timestamptz + interval '1 hour', 'confirmed', $5, $5
-           FROM patients p
-           CROSS JOIN dentists d
-           CROSS JOIN appointment_types t
-           WHERE p.id = $1
-             AND d.id = $2 AND d.active = true
-             AND EXISTS (
-               SELECT 1 FROM staff_profiles s
-               WHERE s.dentist_id = d.id AND s.role = 'dentist' AND s.active = true
-             )
-             AND t.id = $3
-             AND $4::timestamptz > $5
-             AND EXTRACT(ISODOW FROM $4::timestamptz AT TIME ZONE 'Asia/Manila') BETWEEN 1 AND 6
-             AND ($4::timestamptz AT TIME ZONE 'Asia/Manila')::time >= time '09:00'
-             AND ($4::timestamptz AT TIME ZONE 'Asia/Manila')::time < time '17:00'
-             AND EXTRACT(MINUTE FROM $4::timestamptz AT TIME ZONE 'Asia/Manila') = 0
-             AND EXTRACT(SECOND FROM $4::timestamptz AT TIME ZONE 'Asia/Manila') = 0
-             AND NOT EXISTS (
-               SELECT 1 FROM appointments a
-               WHERE (a.dentist_id = d.id OR a.patient_id = p.id)
-                 AND a.status IN ('scheduled', 'confirmed')
-                 AND a.starts_at < $4::timestamptz + interval '1 hour'
-                 AND a.ends_at > $4::timestamptz
-             )
-             AND NOT EXISTS (
-               SELECT 1 FROM appointment_requests r
-               WHERE (r.dentist_id = d.id OR r.patient_id = p.id)
-                 AND r.status IN ('requested', 'confirmed')
-                 AND r.requested_start_at < $4::timestamptz + interval '1 hour'
-                 AND r.requested_end_at > $4::timestamptz
-             )
-           ON CONFLICT (dentist_id, starts_at)
-             WHERE status IN ('scheduled', 'confirmed')
-             DO NOTHING
-           RETURNING id`,
-          [patientId, dentistId, appointmentTypeId, startsAt, now],
-        )
-        return result.rowCount
-          ? { outcome: 'created', id: result.rows[0].id }
-          : { outcome: 'slot_unavailable' }
-      } catch (error) {
-        if (error.code === '23505') return { outcome: 'slot_unavailable' }
-        throw error
-      }
+      return createConfirmedAppointment(db, { patientId, dentistId, appointmentTypeId, startsAt, now })
     },
 
     async listReceptionBilling(date) {

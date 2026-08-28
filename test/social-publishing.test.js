@@ -1,0 +1,126 @@
+import assert from 'node:assert/strict'
+import { test } from 'node:test'
+import sharp from 'sharp'
+import {
+  assertSocialPostPublishable,
+  createSocialPublisher,
+  decryptSocialToken,
+  encryptSocialToken,
+  normalizeSocialImage,
+  SocialBlockedError,
+} from '../server/social-publishing.js'
+
+const settings = {
+  clinicName: 'SmileCare Dental Clinic',
+  primaryColor: '#176B68',
+  secondaryColor: '#DFF3EF',
+  fontFamily: 'Arial',
+  brandVoice: 'Warm and professional',
+  defaultLanguage: 'taglish',
+  contactPhone: '09123456789',
+  address: null,
+  defaultCallToAction: 'Book an appointment',
+  defaultHashtags: ['#SmileCare'],
+  requiredDisclaimer: null,
+  prohibitedPhrases: ['miracle cure'],
+  patientPostsEnabled: false,
+  minorPostsEnabled: false,
+  automaticPublishingEnabled: true,
+  dailyPostLimit: 3,
+  weeklyPostLimit: 12,
+  postingStartHour: 7,
+  postingEndHour: 21,
+  hasLogo: false,
+  logoDriveFileId: null,
+}
+
+test('social tokens are encrypted and patient posts fail closed without specific consent', () => {
+  const key = Buffer.alloc(32, 4)
+  const encrypted = encryptSocialToken('page-secret-token', key, () => Buffer.alloc(12, 7))
+  assert.notEqual(encrypted, 'page-secret-token')
+  assert.equal(decryptSocialToken(encrypted, key), 'page-secret-token')
+  assert.throws(() => assertSocialPostPublishable(
+    {
+      contentType: 'patient_portrait', patientId: 'patient-1', patientName: 'Sample Patient',
+      settings: { ...settings, patientPostsEnabled: true },
+      connection: { status: 'connected', encryptedAccessToken: encrypted }, consent: null,
+    },
+    { patient_visible: true, unsupported_claims: [], safe_to_publish: true },
+    'A friendly clinic visit.',
+  ), SocialBlockedError)
+})
+
+test('social photos are normalized below 2 MB and the worker publishes only once', async () => {
+  const original = await sharp({
+    create: { width: 2200, height: 1600, channels: 3, background: '#cfe9e4' },
+  }).jpeg({ quality: 95 }).withMetadata({ orientation: 6 }).toBuffer()
+  const normalized = await normalizeSocialImage(original)
+  const metadata = await sharp(normalized).metadata()
+  assert.equal(metadata.format, 'jpeg')
+  assert.ok(normalized.length <= 2 * 1024 * 1024)
+  assert.equal(metadata.orientation, undefined)
+
+  const key = Buffer.alloc(32, 9)
+  const files = new Map([['original', normalized]])
+  let claimed = false
+  let metaCalls = 0
+  let resolvePublished
+  const published = new Promise((resolve) => { resolvePublished = resolve })
+  const store = {
+    async claimNextSocialPost() { if (claimed) return null; claimed = true; return 'post-1' },
+    async getSocialPostForProcessing() {
+      return {
+        id: 'post-1', contentType: 'clinic_team', description: 'Welcome our clinic team.',
+        patientId: null, patientName: null, settings,
+        originalImage: { driveFileId: 'original', mimeType: 'image/jpeg' },
+        connection: {
+          pageId: '12345', pageName: 'SmileCare', status: 'connected',
+          encryptedAccessToken: encryptSocialToken('page-token', key, () => Buffer.alloc(12, 2)),
+        },
+        consent: null,
+      }
+    },
+    async saveSocialPostGenerated({ finalImage }) { assert.ok(files.has(finalImage.driveFileId)) },
+    async canPublishSocialPost() { return { allowed: true } },
+    async markSocialPostPublishing() {},
+    async markSocialPostPublished(result) { resolvePublished(result) },
+    async markSocialPostBlocked(id, reason) { assert.fail(`${id} blocked: ${reason}`) },
+    async markSocialPostFailed(id, reason) { assert.fail(`${id} failed: ${reason}`) },
+  }
+  const storage = {
+    async download(id) { return files.get(id) },
+    async upload({ bytes }) { files.set('final', bytes); return 'final' },
+  }
+  const fetchFn = async (url) => {
+    if (url === 'https://api.openai.com/v1/responses') {
+      return Response.json({ output: [{ content: [{ type: 'output_text', text: JSON.stringify({
+        caption: 'Meet the SmileCare team. Book an appointment. #SmileCare',
+        patient_visible: false, minor_possible: false, personal_data_visible: false,
+        clinical_image: false, unsupported_claims: [], promotional_rate: false,
+        safe_to_publish: true, reasons: [],
+      }) }] }] })
+    }
+    if (url === 'https://api.openai.com/v1/moderations') return Response.json({ results: [{ flagged: false }] })
+    if (url.endsWith('/12345/photos')) { metaCalls += 1; return Response.json({ post_id: '12345_67890' }) }
+    throw new Error(`Unexpected request: ${url}`)
+  }
+  const publisher = createSocialPublisher({
+    config: {
+      openAiApiKey: 'test-openai-key', openAiTextModel: 'test-text-model',
+      openAiImageModel: 'test-image-model', socialTokenEncryptionKey: key,
+      metaGraphVersion: 'v25.0',
+    },
+    store, storage, fetchFn, now: () => new Date('2026-08-28T03:00:00.000Z'),
+  })
+  publisher.wake()
+  const result = await Promise.race([
+    published,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('Publishing timed out')), 2000)),
+  ])
+  assert.equal(result.externalPostId, '12345_67890')
+  assert.equal(metaCalls, 1)
+  assert.ok(files.get('final').length <= 2 * 1024 * 1024)
+  publisher.wake()
+  await new Promise((resolve) => setTimeout(resolve, 25))
+  assert.equal(metaCalls, 1)
+})

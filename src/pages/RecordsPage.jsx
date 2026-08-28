@@ -38,6 +38,7 @@ export default function RecordsPage() {
   useEffect(() => { load() }, [load])
 
   const viewedRecords = records.map(recordView)
+  const pendingFollowUps = followUps.filter(({ status }) => status === 'pending')
   const linkedAppointments = new Set(viewedRecords.map(({ appointmentId }) => appointmentId).filter(Boolean))
   const history = [
     ...viewedRecords.map((record) => ({
@@ -69,11 +70,11 @@ export default function RecordsPage() {
     {loading ? <LoadingState label="Loading your history…" />
       : error ? <ErrorState error={error} onRetry={load} />
         : <div className="space-y-7">
-          {(appointments.length || followUps.length) && <section className="rounded-3xl bg-white p-5 soft-shadow sm:p-6" aria-label="Upcoming care">
+          {(appointments.length || pendingFollowUps.length) && <section className="rounded-3xl bg-white p-5 soft-shadow sm:p-6" aria-label="Upcoming care">
             <div className="flex items-center gap-3"><CalendarClock className="text-brand" size={21} /><div><h2 className="text-xl font-extrabold">Upcoming care</h2><p className="mt-1 text-xs text-ink/45">Confirmed clinic visits and dates recommended by your dentist.</p></div></div>
             <div className="mt-5 grid gap-3 lg:grid-cols-2">
               {appointments.map((appointment) => <article className="rounded-2xl bg-mint/45 p-4" key={`appointment-${appointment.id}`}><p className="text-[10px] font-extrabold uppercase tracking-[.14em] text-brand/60">Confirmed appointment</p><h3 className="mt-1 font-extrabold">{appointment.typeName}</h3><p className="mt-2 text-xs font-bold text-ink/50">{formatDateTime(appointment.startsAt)} · {appointment.dentistName}</p></article>)}
-              {followUps.map((item) => <article className="rounded-2xl bg-cream/80 p-4" key={`follow-up-${item.id}`}><p className="text-[10px] font-extrabold uppercase tracking-[.14em] text-ink/40">Dentist recommendation · {titleCase(item.status)}</p><h3 className="mt-1 font-extrabold">{item.serviceName || 'Follow-up visit'}</h3><p className="mt-2 text-xs font-bold text-ink/50">Recommended for {formatDate(item.recommendedOn)} · {item.dentistName}</p>{item.notes && <p className="mt-2 text-xs leading-5 text-ink/55">{item.notes}</p>}<p className="mt-2 text-[11px] text-ink/40">Reception will confirm the exact time.</p></article>)}
+              {pendingFollowUps.map((item) => <article className="rounded-2xl bg-cream/80 p-4" key={`follow-up-${item.id}`}><p className="text-[10px] font-extrabold uppercase tracking-[.14em] text-ink/40">Dentist recommendation · {titleCase(item.status)}</p><h3 className="mt-1 font-extrabold">{item.serviceName || 'Follow-up visit'}</h3><p className="mt-2 text-xs font-bold text-ink/50">Recommended for {formatDate(item.recommendedOn)} · {item.dentistName}</p>{item.notes && <p className="mt-2 text-xs leading-5 text-ink/55">{item.notes}</p>}<p className="mt-2 text-[11px] text-ink/40">Reception will confirm the exact time.</p></article>)}
             </div>
           </section>}
 
@@ -105,7 +106,7 @@ export default function RecordsPage() {
               {!!charge.payments.length && <div className="mt-4 space-y-2">{charge.payments.map((payment) => <div className="flex flex-wrap justify-between gap-2 text-xs text-ink/55" key={payment.id}><span>{formatDate(payment.receivedAt)} · {titleCase(payment.method)}</span><span className="font-extrabold">{formatCurrency(payment.amountCents)}</span></div>)}</div>}
             </div>}
           </article>)}
-          </section> : !prescriptions.length && !followUps.length && !appointments.length
+          </section> : !prescriptions.length && !pendingFollowUps.length && !appointments.length
             ? <EmptyState icon={FileText} title="No history yet" message="Completed treatments, prescriptions, follow-up recommendations, and payment records will appear here." />
             : null}
         </div>}

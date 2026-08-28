@@ -150,6 +150,7 @@ function CreateSchedule({ close, dentists, services, initialDate, onCreated }) {
   const [serviceId, setServiceId] = useState(services[0]?.id || '')
   const [date, setDate] = useState(initialDate)
   const [time, setTime] = useState(clinicTimeForDate(initialDate))
+  const [availability, setAvailability] = useState({ loading: true, slots: [], error: '' })
   const [searching, setSearching] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -163,6 +164,25 @@ function CreateSchedule({ close, dentists, services, initialDate, onCreated }) {
       window.removeEventListener('keydown', onKeyDown)
     }
   }, [close])
+
+  useEffect(() => {
+    let active = true
+    setAvailability({ loading: true, slots: [], error: '' })
+    api.getReceptionAvailability(date)
+      .then(({ slots = [] }) => active && setAvailability({ loading: false, slots, error: '' }))
+      .catch((requestError) => active && setAvailability({ loading: false, slots: [], error: requestError.message || 'Availability could not be loaded.' }))
+    return () => { active = false }
+  }, [date])
+
+  const availableTimes = availability.slots
+    .filter((slot) => slot.dentistId === dentistId && slot.available)
+    .map((slot) => ({ startsAt: slot.startsAt, time: manilaDateTime(slot.startsAt).time }))
+
+  useEffect(() => {
+    if (!availability.loading && !availableTimes.some((slot) => slot.time === time)) {
+      setTime(availableTimes[0]?.time || '')
+    }
+  }, [availability.loading, availability.slots, dentistId, time])
 
   const searchPatients = async () => {
     if (query.trim().length < 2) {
@@ -226,11 +246,12 @@ function CreateSchedule({ close, dentists, services, initialDate, onCreated }) {
       <div className="mt-6 grid gap-4 sm:grid-cols-2">
         <label className="text-sm font-extrabold">Service<select className="input-field mt-2" required value={serviceId} onChange={(event) => setServiceId(event.target.value)}>{services.map((service) => <option key={service.id} value={service.id}>{service.name}</option>)}</select></label>
         <label className="text-sm font-extrabold">Dentist<select className="input-field mt-2" required value={dentistId} onChange={(event) => setDentistId(event.target.value)}>{dentists.map((dentist) => <option key={dentist.id} value={dentist.id}>{dentist.displayName}</option>)}</select></label>
-        <label className="text-sm font-extrabold">Date<input className="input-field mt-2" type="date" min={manilaToday()} required value={date} onChange={(event) => { const nextDate = event.target.value; setDate(nextDate); setTime(clinicTimeForDate(nextDate) || '09:00') }} /></label>
-        <label className="text-sm font-extrabold">Time<select className="input-field mt-2" required value={time} onChange={(event) => setTime(event.target.value)}>{hourlyTimes.map((value) => <option key={value} value={value}>{formatTime(new Date(`2000-01-01T${value}:00+08:00`))}</option>)}</select></label>
+        <label className="text-sm font-extrabold">Date<input className="input-field mt-2" type="date" min={manilaToday()} required value={date} onChange={(event) => { setDate(event.target.value); setTime('') }} /></label>
+        <label className="text-sm font-extrabold">Available time<select className="input-field mt-2" disabled={availability.loading || !availableTimes.length} required value={time} onChange={(event) => setTime(event.target.value)}><option value="">{availability.loading ? 'Checking hours…' : availableTimes.length ? 'Choose time' : 'No available hours'}</option>{availableTimes.map((slot) => <option key={slot.startsAt} value={slot.time}>{formatTime(slot.startsAt)}</option>)}</select></label>
       </div>
+      {availability.error && <p className="mt-4 rounded-xl bg-[#fff0e7] p-3 text-sm text-[#914b22]" role="alert">{availability.error}</p>}
       {error && <p className="mt-4 rounded-xl bg-[#fff0e7] p-3 text-sm text-[#914b22]" role="alert">{error}</p>}
-      <button className="mt-6 rounded-xl bg-brand px-5 py-3 text-sm font-extrabold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50" disabled={busy || !patient || !dentistId || !serviceId} type="submit">{busy ? 'Scheduling…' : 'Create appointment'}</button>
+      <button className="mt-6 rounded-xl bg-brand px-5 py-3 text-sm font-extrabold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50" disabled={busy || !patient || !dentistId || !serviceId || !time} type="submit">{busy ? 'Scheduling…' : 'Create appointment'}</button>
     </form>
   </div>
 }

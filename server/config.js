@@ -35,7 +35,13 @@ export function loadConfig(env = process.env) {
   )
   const googleDrivePrescriptionsFolderId = env.GOOGLE_DRIVE_PRESCRIPTIONS_FOLDER_ID?.trim()
   const googleDriveCredentialsBase64 = env.GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64?.trim()
+  const openAiApiKey = env.OPENAI_API_KEY?.trim()
+  const openAiTextModel = env.OPENAI_TEXT_MODEL?.trim() || 'gpt-5-mini'
+  const openAiImageModel = env.OPENAI_IMAGE_MODEL?.trim() || 'gpt-image-2'
+  const metaGraphVersion = env.META_GRAPH_VERSION?.trim() || 'v25.0'
+  const socialTokenEncryptionKeyBase64 = env.SOCIAL_TOKEN_ENCRYPTION_KEY?.trim()
   let googleDriveCredentials
+  let socialTokenEncryptionKey
 
   if (Boolean(googleDrivePrescriptionsFolderId) !== Boolean(googleDriveCredentialsBase64)) {
     errors.push('Google Drive folder ID and service account credentials must be configured together')
@@ -47,6 +53,17 @@ export function loadConfig(env = process.env) {
     } catch {
       errors.push('GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64 must contain valid service account JSON')
     }
+  }
+  if (socialTokenEncryptionKeyBase64) {
+    try {
+      socialTokenEncryptionKey = Buffer.from(socialTokenEncryptionKeyBase64, 'base64')
+      if (socialTokenEncryptionKey.length !== 32) throw new Error()
+    } catch {
+      errors.push('SOCIAL_TOKEN_ENCRYPTION_KEY must be a base64-encoded 32-byte key')
+    }
+  }
+  if (!/^v\d+\.0$/u.test(metaGraphVersion)) {
+    errors.push('META_GRAPH_VERSION must look like v25.0')
   }
 
   if (!['development', 'test', 'production'].includes(nodeEnv)) {
@@ -165,5 +182,10 @@ export function loadConfig(env = process.env) {
     supabasePublishableKey,
     googleDrivePrescriptionsFolderId,
     googleDriveCredentials,
+    openAiApiKey,
+    openAiTextModel,
+    openAiImageModel,
+    metaGraphVersion,
+    socialTokenEncryptionKey,
   })
 }

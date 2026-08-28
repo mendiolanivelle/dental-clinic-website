@@ -261,6 +261,19 @@ export default async function staffRoutes(
     },
   )
 
+  app.get(
+    '/api/staff/availability',
+    { preHandler: requireReception, schema: { querystring: dateQuery } },
+    async (request, reply) => {
+      if (request.query.date < manilaDate(now())) {
+        return reply.code(400).send({ error: { code: 'INVALID_DATE', message: 'Choose today or a future date.' } })
+      }
+      const slots = await store.listAvailability(request.query.date, now())
+      await audit(request, 'staff.availability_viewed')
+      return { date: request.query.date, timezone: 'Asia/Manila', slotMinutes: 60, slots }
+    },
+  )
+
   app.get('/api/staff/dentists', { preHandler: requireReception }, async (request) => {
     const dentists = await store.listActiveDentists()
     await audit(request, 'staff.dentists_listed')

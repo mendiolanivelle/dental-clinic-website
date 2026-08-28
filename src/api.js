@@ -97,6 +97,8 @@ export const api = {
   }),
   getReceptionCalendar: (date) =>
     request(`/api/staff/calendar?date=${encodeURIComponent(date)}`),
+  getReceptionAvailability: (date) =>
+    request(`/api/staff/availability?date=${encodeURIComponent(date)}`),
   getReceptionDentists: () => request('/api/staff/dentists'),
   getReceptionServices: () => request('/api/staff/services'),
   createReceptionAppointment: (details) => request('/api/staff/appointments', {
@@ -131,6 +133,7 @@ export const api = {
     body: json(details),
   }),
   getDentistDashboard: () => request('/api/dentist/dashboard'),
+  getDentistAvailability: (date) => request(`/api/dentist/availability?date=${encodeURIComponent(date)}`),
   searchDentistPatients: (query) =>
     request(`/api/dentist/patients?q=${encodeURIComponent(query)}`),
   getDentistPatient: (id) => request(`/api/dentist/patients/${id}`),
@@ -149,6 +152,12 @@ export const api = {
       method: 'POST',
       body: json(details),
     }),
+  getDentistSocialPosts: () => request('/api/dentist/social/posts'),
+  searchDentistSocialPatients: (query) => request(`/api/dentist/social/patients?q=${encodeURIComponent(query)}`),
+  createDentistSocialPost: (details) => request('/api/dentist/social/posts', {
+    method: 'POST',
+    body: json(details),
+  }),
   getAdminAnalytics: (section, query = '') => request(`/api/admin/${section}${query ? `?${query}` : ''}`),
   getAdminTeam: () => request('/api/admin/team'),
   createAdminDentist: (details) => request('/api/admin/team/dentists', { method: 'POST', body: json(details) }),
@@ -157,4 +166,10 @@ export const api = {
   resetAdminStaffPassword: (id, password) => request(`/api/admin/team/${id}/reset-password`, { method: 'POST', body: json({ password }) }),
   revokeAdminStaffSessions: (id) => request(`/api/admin/team/${id}/revoke-sessions`, { method: 'POST' }),
   getAdminAudit: () => request('/api/admin/audit'),
+  getAdminSocialSettings: () => request('/api/admin/social/settings'),
+  updateAdminSocialSettings: (details) => request('/api/admin/social/settings', { method: 'PUT', body: json(details) }),
+  connectAdminFacebookPage: (details) => request('/api/admin/social/facebook/connect', { method: 'POST', body: json(details) }),
+  disconnectAdminFacebookPage: () => request('/api/admin/social/facebook/connection', { method: 'DELETE' }),
+  getAdminSocialPosts: () => request('/api/admin/social/posts'),
+  removeAdminSocialPost: (id) => request(`/api/admin/social/posts/${id}/remove`, { method: 'POST' }),
 }

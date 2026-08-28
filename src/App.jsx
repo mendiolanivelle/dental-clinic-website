@@ -19,10 +19,12 @@ import ReceptionRequestsPage from './pages/ReceptionRequestsPage'
 import DentistDashboardPage from './pages/DentistDashboardPage'
 import DentistPatientsPage from './pages/DentistPatientsPage'
 import DentistPatientPage from './pages/DentistPatientPage'
+import DentistSocialPage from './pages/DentistSocialPage'
 import AdminLayout from './components/AdminLayout'
 import AdminAnalyticsPage from './pages/AdminAnalyticsPage'
 import AdminTeamPage from './pages/AdminTeamPage'
 import AdminAuditPage from './pages/AdminAuditPage'
+import AdminSocialPage from './pages/AdminSocialPage'
 import { patientFrom } from './portalData'
 
 const staffHome = (staff) => ({
@@ -173,6 +175,7 @@ export default function App() {
         <Route index element={<DentistDashboardPage />} />
         <Route path="patients" element={<DentistPatientsPage />} />
         <Route path="patients/:id" element={<DentistPatientPage />} />
+        <Route path="social" element={<DentistSocialPage />} />
       </Route>
       <Route
         path="/admin"
@@ -188,6 +191,7 @@ export default function App() {
         <Route path="team" element={<AdminTeamPage />} />
         <Route path="meeting" element={<AdminAnalyticsPage mode="meeting" />} />
         <Route path="audit" element={<AdminAuditPage />} />
+        <Route path="social" element={<AdminSocialPage />} />
       </Route>
       <Route path="*" element={<Navigate replace to={authenticated ? home : '/login'} />} />
     </Routes>

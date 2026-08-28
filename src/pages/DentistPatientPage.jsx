@@ -14,7 +14,7 @@ import {
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../api'
 import { EmptyState, ErrorState, LoadingState } from '../components/PageState'
-import { formatDate, formatDateTime, titleCase } from '../format'
+import { formatDate, formatDateTime, formatTime, titleCase } from '../format'
 import { preparePrescriptionImage } from '../prescriptionImage'
 
 const todayInManila = () => new Intl.DateTimeFormat('en-CA', {
@@ -25,13 +25,43 @@ const todayInManila = () => new Intl.DateTimeFormat('en-CA', {
 }).format(new Date())
 
 const toCents = (value) => Math.round(Number(value || 0) * 100)
+const emptyFollowUp = { date: '', startsAt: '', appointmentTypeId: '', notes: '' }
+
+function FollowUpScheduleFields({ followUp, setFollowUp, services }) {
+  const [availability, setAvailability] = useState({ loading: false, slots: [], error: '' })
+
+  useEffect(() => {
+    if (!followUp.date) {
+      setAvailability({ loading: false, slots: [], error: '' })
+      return undefined
+    }
+    let active = true
+    setAvailability({ loading: true, slots: [], error: '' })
+    api.getDentistAvailability(followUp.date)
+      .then(({ slots = [] }) => active && setAvailability({ loading: false, slots, error: '' }))
+      .catch((error) => active && setAvailability({ loading: false, slots: [], error: error.message || 'Availability could not be loaded.' }))
+    return () => { active = false }
+  }, [followUp.date])
+
+  return <>
+    <label className="mt-5 block text-sm font-extrabold">Date<input className="input-field mt-2" min={todayInManila()} required type="date" value={followUp.date} onChange={(event) => setFollowUp({ ...followUp, date: event.target.value, startsAt: '' })} /></label>
+    <label className="mt-4 block text-sm font-extrabold">Service<select className="input-field mt-2" required value={followUp.appointmentTypeId} onChange={(event) => setFollowUp({ ...followUp, appointmentTypeId: event.target.value })}><option value="">Choose service</option>{services.map((service) => <option key={service.id} value={service.id}>{service.name}</option>)}</select></label>
+    {followUp.date && <div className="mt-4"><p className="text-sm font-extrabold">Available one-hour schedule</p>
+      {availability.loading ? <p className="mt-2 text-xs text-ink/45">Checking your schedule…</p>
+        : availability.error ? <p className="mt-2 text-xs text-[#914b22]">{availability.error}</p>
+          : availability.slots.length ? <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">{availability.slots.map((slot) => <button className={`rounded-xl border px-3 py-2.5 text-xs font-extrabold ${followUp.startsAt === slot.startsAt ? 'border-brand bg-brand text-white' : slot.available ? 'border-brand/15 bg-mint text-brand' : 'cursor-not-allowed border-ink/5 bg-ink/5 text-ink/25'}`} disabled={!slot.available} key={slot.startsAt} onClick={() => setFollowUp({ ...followUp, startsAt: slot.startsAt })} type="button">{formatTime(slot.startsAt)}{slot.available ? '' : ' · Booked'}</button>)}</div>
+            : <p className="mt-2 text-xs text-ink/45">No clinic hours are available on this date.</p>}
+    </div>}
+    <label className="mt-4 block text-sm font-extrabold">Patient note<textarea className="input-field mt-2 min-h-24" maxLength="1000" value={followUp.notes} onChange={(event) => setFollowUp({ ...followUp, notes: event.target.value })} /></label>
+  </>
+}
 
 function CompletionDialog({ appointment, patientId, services, onClose, onComplete }) {
   const [step, setStep] = useState('prescriptionQuestion')
   const [hasPrescription, setHasPrescription] = useState(null)
   const [hasFollowUp, setHasFollowUp] = useState(null)
   const [prescription, setPrescription] = useState({ file: null })
-  const [followUp, setFollowUp] = useState({ recommendedOn: '', appointmentTypeId: '', notes: '' })
+  const [followUp, setFollowUp] = useState(emptyFollowUp)
   const [fee, setFee] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -47,8 +77,8 @@ function CompletionDialog({ appointment, patientId, services, onClose, onComplet
   }
 
   const continueFollowUp = () => {
-    if (!followUp.recommendedOn) {
-      setError('Choose a recommended follow-up date.')
+    if (!followUp.startsAt || !followUp.appointmentTypeId) {
+      setError('Choose the service and one available hour for the follow-up.')
       return
     }
     setError('')
@@ -77,8 +107,8 @@ function CompletionDialog({ appointment, patientId, services, onClose, onComplet
           ...preparedImage,
         } : null,
         followUp: hasFollowUp ? {
-          recommendedOn: followUp.recommendedOn,
-          appointmentTypeId: followUp.appointmentTypeId || null,
+          startsAt: followUp.startsAt,
+          appointmentTypeId: followUp.appointmentTypeId,
           notes: followUp.notes.trim(),
         } : null,
       })
@@ -101,9 +131,9 @@ function CompletionDialog({ appointment, patientId, services, onClose, onComplet
 
       {step === 'prescription' && <div className="mt-7"><h3 className="text-xl font-extrabold">Take a photo of the written prescription</h3><p className="mt-2 text-sm text-ink/50">Make sure the full prescription is readable and well lit. Large photos are compressed automatically to 2 MB or less.</p><label className="mt-5 block text-sm font-extrabold">Prescription photo<input accept="image/jpeg,image/png,image/webp" capture="environment" className="mt-2 block w-full text-xs text-ink/55" type="file" onChange={(event) => setPrescription({ file: event.target.files?.[0] || null })} /></label><button className="mt-6 w-full rounded-2xl bg-brand px-5 py-3 font-extrabold text-white" type="button" onClick={continuePrescription}>Next</button></div>}
 
-      {step === 'followUpQuestion' && <div className="mt-7"><h3 className="text-xl font-extrabold">Should the patient return for a follow-up?</h3><p className="mt-2 text-sm text-ink/50">If yes, add a recommended date for reception to schedule.</p><div className="mt-6 grid grid-cols-2 gap-3"><button className="rounded-2xl border border-ink/10 px-5 py-3 font-extrabold" type="button" onClick={() => { setHasFollowUp(false); setStep('fee') }}>No</button><button className="rounded-2xl bg-brand px-5 py-3 font-extrabold text-white" type="button" onClick={() => { setHasFollowUp(true); setStep('followUp') }}>Yes</button></div></div>}
+      {step === 'followUpQuestion' && <div className="mt-7"><h3 className="text-xl font-extrabold">Should the patient return for a follow-up?</h3><p className="mt-2 text-sm text-ink/50">If yes, choose an open hour. The appointment will be confirmed immediately.</p><div className="mt-6 grid grid-cols-2 gap-3"><button className="rounded-2xl border border-ink/10 px-5 py-3 font-extrabold" type="button" onClick={() => { setHasFollowUp(false); setStep('fee') }}>No</button><button className="rounded-2xl bg-brand px-5 py-3 font-extrabold text-white" type="button" onClick={() => { setHasFollowUp(true); setStep('followUp') }}>Yes</button></div></div>}
 
-      {step === 'followUp' && <div className="mt-7"><h3 className="text-xl font-extrabold">Plan the follow-up</h3><label className="mt-5 block text-sm font-extrabold">Recommended date<input className="input-field mt-2" min={todayInManila()} type="date" value={followUp.recommendedOn} onChange={(event) => setFollowUp({ ...followUp, recommendedOn: event.target.value })} /></label><label className="mt-4 block text-sm font-extrabold">Service<select className="input-field mt-2" value={followUp.appointmentTypeId} onChange={(event) => setFollowUp({ ...followUp, appointmentTypeId: event.target.value })}><option value="">To be decided</option>{services.map((service) => <option key={service.id} value={service.id}>{service.name}</option>)}</select></label><label className="mt-4 block text-sm font-extrabold">Clinical note<textarea className="input-field mt-2 min-h-24" maxLength="1000" value={followUp.notes} onChange={(event) => setFollowUp({ ...followUp, notes: event.target.value })} /></label><button className="mt-6 w-full rounded-2xl bg-brand px-5 py-3 font-extrabold text-white" type="button" onClick={continueFollowUp}>Next</button></div>}
+      {step === 'followUp' && <div className="mt-7"><h3 className="text-xl font-extrabold">Book the follow-up</h3><FollowUpScheduleFields followUp={followUp} setFollowUp={setFollowUp} services={services} /><button className="mt-6 w-full rounded-2xl bg-brand px-5 py-3 font-extrabold text-white" type="button" onClick={continueFollowUp}>Confirm schedule</button></div>}
 
       {step === 'fee' && <form className="mt-7" onSubmit={finish}><h3 className="text-xl font-extrabold">What is the suggested treatment fee?</h3><p className="mt-2 text-sm text-ink/50">Reception can review and edit this amount before collecting payment.</p><label className="mt-5 block text-sm font-extrabold">Suggested fee<input autoFocus className="input-field mt-2" min="0.01" placeholder="0.00" required step="0.01" type="number" value={fee} onChange={(event) => setFee(event.target.value)} /></label><button className="mt-6 w-full rounded-2xl bg-brand px-5 py-3 font-extrabold text-white disabled:opacity-60" disabled={busy} type="submit">{busy ? 'Sending to reception…' : 'Done — send to billing'}</button></form>}
 
@@ -118,7 +148,7 @@ export default function DentistPatientPage() {
   const [message, setMessage] = useState('')
   const [actionError, setActionError] = useState('')
   const [prescription, setPrescription] = useState({ file: null })
-  const [followUp, setFollowUp] = useState({ recommendedOn: '', appointmentTypeId: '', notes: '' })
+  const [followUp, setFollowUp] = useState(emptyFollowUp)
   const [savingPrescription, setSavingPrescription] = useState(false)
   const [savingFollowUp, setSavingFollowUp] = useState(false)
   const [showCompletion, setShowCompletion] = useState(false)
@@ -166,12 +196,12 @@ export default function DentistPatientPage() {
     setMessage('')
     try {
       await api.createDentistFollowUp(id, {
-        recommendedOn: followUp.recommendedOn,
-        appointmentTypeId: followUp.appointmentTypeId || null,
+        startsAt: followUp.startsAt,
+        appointmentTypeId: followUp.appointmentTypeId,
         notes: followUp.notes.trim(),
       })
-      setFollowUp({ recommendedOn: '', appointmentTypeId: '', notes: '' })
-      setMessage('Next-visit recommendation saved for scheduling.')
+      setFollowUp(emptyFollowUp)
+      setMessage('Follow-up appointment confirmed and added to your schedule.')
       load()
     } catch (error) {
       setActionError(error.message || 'The next visit could not be saved.')
@@ -255,15 +285,13 @@ export default function DentistPatientPage() {
 
         <form className="rounded-3xl bg-white p-5 soft-shadow sm:p-6" onSubmit={saveFollowUp}>
           <div className="flex items-center gap-3"><CalendarPlus className="text-brand" size={21} /><h2 className="text-lg font-extrabold">Plan next visit</h2></div>
-          <p className="mt-2 text-xs leading-5 text-ink/45">This creates a recommendation for scheduling, not a confirmed appointment.</p>
-          <label className="mt-5 block text-sm font-extrabold">Recommended date<input className="input-field mt-2" min={todayInManila()} required type="date" value={followUp.recommendedOn} onChange={(event) => setFollowUp({ ...followUp, recommendedOn: event.target.value })} /></label>
-          <label className="mt-4 block text-sm font-extrabold">Service<select className="input-field mt-2" value={followUp.appointmentTypeId} onChange={(event) => setFollowUp({ ...followUp, appointmentTypeId: event.target.value })}><option value="">To be decided</option>{services.map((service) => <option key={service.id} value={service.id}>{service.name}</option>)}</select></label>
-          <label className="mt-4 block text-sm font-extrabold">Clinical note<textarea className="input-field mt-2 min-h-24" maxLength="1000" value={followUp.notes} onChange={(event) => setFollowUp({ ...followUp, notes: event.target.value })} /></label>
-          <button className="mt-5 w-full rounded-xl bg-brand px-5 py-3 text-sm font-extrabold text-white disabled:opacity-60" disabled={savingFollowUp} type="submit">{savingFollowUp ? 'Saving…' : 'Save recommendation'}</button>
+          <p className="mt-2 text-xs leading-5 text-ink/45">Choose an open one-hour slot. The appointment is confirmed immediately and blocks your schedule.</p>
+          <FollowUpScheduleFields followUp={followUp} setFollowUp={setFollowUp} services={services} />
+          <button className="mt-5 w-full rounded-xl bg-brand px-5 py-3 text-sm font-extrabold text-white disabled:opacity-60" disabled={savingFollowUp || !followUp.startsAt || !followUp.appointmentTypeId} type="submit">{savingFollowUp ? 'Scheduling…' : 'Confirm appointment'}</button>
           {!!followUps.length && <div className="mt-5 border-t border-ink/8 pt-4"><p className="text-xs font-extrabold uppercase tracking-[.12em] text-ink/40">Recent recommendations</p>{followUps.slice(0, 4).map((item) => <div className="mt-3 rounded-xl bg-cream p-3" key={item.id}><p className="text-sm font-extrabold">{item.serviceName || 'Follow-up visit'}</p><p className="mt-1 text-xs text-ink/50">{formatDate(item.recommendedOn)} · {titleCase(item.status)}</p>{item.notes && <p className="mt-2 text-xs leading-5 text-ink/55">{item.notes}</p>}</div>)}</div>}
         </form>
       </aside>
     </div>
-    {showCompletion && completionAppointment && <CompletionDialog appointment={completionAppointment} patientId={patient.id} services={services} onClose={() => setShowCompletion(false)} onComplete={() => { setShowCompletion(false); setMessage('Visit finished and sent to reception for billing.'); load() }} />}
+    {showCompletion && completionAppointment && <CompletionDialog appointment={completionAppointment} patientId={patient.id} services={services} onClose={() => setShowCompletion(false)} onComplete={() => { setShowCompletion(false); setMessage('Visit finished and sent to reception for billing. Any selected follow-up was confirmed automatically.'); load() }} />}
   </>
 }

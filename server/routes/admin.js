@@ -2,6 +2,18 @@ import { ipDigest, normalizeName } from '../auth.js'
 import { resolveAdminPeriod } from '../admin-period.js'
 import { hashStaffPassword } from '../staff-auth.js'
 
+const socialImageSignatures = {
+  'image/jpeg': (bytes) => bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff,
+  'image/png': (bytes) => bytes.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex')),
+  'image/webp': (bytes) => bytes.subarray(0, 4).toString() === 'RIFF' && bytes.subarray(8, 12).toString() === 'WEBP',
+}
+
+const decodeSocialImage = ({ imageBase64, imageMimeType }) => {
+  if (!imageBase64 || !/^[A-Za-z0-9+/]+={0,2}$/u.test(imageBase64) || imageBase64.length % 4 !== 0) return null
+  const bytes = Buffer.from(imageBase64, 'base64')
+  return bytes.length && bytes.length <= 2 * 1024 * 1024 && socialImageSignatures[imageMimeType]?.(bytes) ? bytes : null
+}
+
 const idParams = {
   type: 'object', additionalProperties: false, required: ['id'],
   properties: { id: { type: 'string', format: 'uuid' } },
@@ -36,7 +48,9 @@ const publicAccount = ({ id, displayName, role, active, dentistId = null, dentis
   id, displayName, role, active, dentistId, dentistName, specialty, createdAt, lastLoginAt,
 })
 
-export default async function adminRoutes(app, { store, config, now, randomBytes, randomUUID }) {
+export default async function adminRoutes(app, {
+  store, config, now, randomBytes, randomUUID, socialStorage, socialPublisher,
+}) {
   const requireAdmin = async (request, reply) => {
     await app.authenticateStaff(request, reply)
     if (reply.sent) return
@@ -175,5 +189,160 @@ export default async function adminRoutes(app, { store, config, now, randomBytes
     const events = await store.listAdminAudit(request.query.limit || 100)
     await audit(request, 'admin.audit_viewed')
     return { events }
+  })
+
+  const publicSocialSettings = (settings) => ({
+    ...settings,
+    logoDriveFileId: undefined,
+    logoMimeType: undefined,
+    integrationConfigured: Boolean(socialPublisher?.configured),
+    aiConfigured: Boolean(config.openAiApiKey),
+    tokenEncryptionConfigured: Boolean(config.socialTokenEncryptionKey),
+    storageConfigured: Boolean(socialStorage),
+  })
+
+  app.get('/api/admin/social/settings', { preHandler: requireAdmin }, async (request) => {
+    const settings = await store.getSocialSettings()
+    await audit(request, 'admin.social_settings_viewed')
+    return { settings: publicSocialSettings(settings) }
+  })
+
+  app.put('/api/admin/social/settings', {
+    preHandler: requireAdmin,
+    bodyLimit: 3 * 1024 * 1024,
+    schema: {
+      body: {
+        type: 'object', additionalProperties: false,
+        required: [
+          'clinicName', 'primaryColor', 'secondaryColor', 'fontFamily', 'brandVoice', 'defaultLanguage',
+          'defaultHashtags', 'prohibitedPhrases', 'patientPostsEnabled', 'minorPostsEnabled',
+          'automaticPublishingEnabled', 'dailyPostLimit', 'weeklyPostLimit',
+          'postingStartHour', 'postingEndHour',
+        ],
+        properties: {
+          clinicName: { type: 'string', minLength: 2, maxLength: 160 },
+          primaryColor: { type: 'string', pattern: '^#[0-9A-Fa-f]{6}$' },
+          secondaryColor: { type: 'string', pattern: '^#[0-9A-Fa-f]{6}$' },
+          fontFamily: { type: 'string', enum: ['Arial', 'Georgia', 'Verdana'] },
+          brandVoice: { type: 'string', minLength: 2, maxLength: 500 },
+          defaultLanguage: { type: 'string', enum: ['english', 'filipino', 'taglish'] },
+          contactPhone: { anyOf: [{ type: 'string', maxLength: 80 }, { type: 'null' }] },
+          address: { anyOf: [{ type: 'string', maxLength: 300 }, { type: 'null' }] },
+          defaultCallToAction: { anyOf: [{ type: 'string', maxLength: 300 }, { type: 'null' }] },
+          defaultHashtags: { type: 'array', maxItems: 30, items: { type: 'string', maxLength: 80 } },
+          requiredDisclaimer: { anyOf: [{ type: 'string', maxLength: 500 }, { type: 'null' }] },
+          prohibitedPhrases: { type: 'array', maxItems: 50, items: { type: 'string', maxLength: 120 } },
+          patientPostsEnabled: { type: 'boolean' },
+          minorPostsEnabled: { type: 'boolean' },
+          automaticPublishingEnabled: { type: 'boolean' },
+          dailyPostLimit: { type: 'integer', minimum: 1, maximum: 25 },
+          weeklyPostLimit: { type: 'integer', minimum: 1, maximum: 100 },
+          postingStartHour: { type: 'integer', minimum: 0, maximum: 23 },
+          postingEndHour: { type: 'integer', minimum: 0, maximum: 23 },
+          logo: {
+            anyOf: [
+              { type: 'null' },
+              {
+                type: 'object', additionalProperties: false,
+                required: ['imageBase64', 'imageMimeType'],
+                properties: {
+                  imageBase64: { type: 'string', minLength: 4, maxLength: 2_800_000 },
+                  imageMimeType: { type: 'string', enum: Object.keys(socialImageSignatures) },
+                },
+              },
+            ],
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const current = await store.getSocialSettings()
+    let logoDriveFileId = null
+    let logoMimeType = null
+    if (request.body.logo) {
+      if (!socialStorage) return reply.code(503).send({ error: { code: 'STORAGE_NOT_CONFIGURED', message: 'Private image storage is not configured.' } })
+      const bytes = decodeSocialImage(request.body.logo)
+      if (!bytes) return reply.code(400).send({ error: { code: 'INVALID_LOGO', message: 'Upload a valid logo image up to 2 MB.' } })
+      logoDriveFileId = await socialStorage.upload({ bytes, mimeType: request.body.logo.imageMimeType, prefix: 'social-logo' })
+      logoMimeType = request.body.logo.imageMimeType
+    }
+    try {
+      const clean = (value) => value?.trim() || null
+      const settings = await store.updateSocialSettings({
+        ...request.body,
+        clinicName: request.body.clinicName.trim(),
+        brandVoice: request.body.brandVoice.trim(),
+        contactPhone: clean(request.body.contactPhone),
+        address: clean(request.body.address),
+        defaultCallToAction: clean(request.body.defaultCallToAction),
+        requiredDisclaimer: clean(request.body.requiredDisclaimer),
+        defaultHashtags: request.body.defaultHashtags.map((value) => value.trim()).filter(Boolean),
+        prohibitedPhrases: request.body.prohibitedPhrases.map((value) => value.trim()).filter(Boolean),
+        logoDriveFileId,
+        logoMimeType,
+      }, now())
+      if (logoDriveFileId && current.logoDriveFileId) await socialStorage.remove(current.logoDriveFileId)
+      await audit(request, 'admin.social_settings_updated')
+      return { settings: publicSocialSettings(settings) }
+    } catch (error) {
+      if (logoDriveFileId) await socialStorage.remove(logoDriveFileId)
+      throw error
+    }
+  })
+
+  app.post('/api/admin/social/facebook/connect', {
+    preHandler: requireAdmin,
+    schema: {
+      body: {
+        type: 'object', additionalProperties: false, required: ['pageId', 'accessToken'],
+        properties: {
+          pageId: { type: 'string', minLength: 1, maxLength: 100 },
+          accessToken: { type: 'string', minLength: 20, maxLength: 2000 },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    if (!socialPublisher) return reply.code(503).send({ error: { code: 'SOCIAL_NOT_CONFIGURED', message: 'Social publishing is not configured on this server.' } })
+    let page
+    try {
+      page = await socialPublisher.verifyPage({ pageId: request.body.pageId.trim(), accessToken: request.body.accessToken.trim() })
+    } catch (error) {
+      return reply.code(400).send({ error: { code: 'FACEBOOK_CONNECTION_FAILED', message: error.message } })
+    }
+    await store.setSocialPageConnection({ ...page, staffId: request.staff.id, now: now() })
+    await audit(request, 'admin.facebook_page_connected')
+    return { page: { id: page.pageId, name: page.pageName, status: 'connected' } }
+  })
+
+  app.delete('/api/admin/social/facebook/connection', { preHandler: requireAdmin }, async (request, reply) => {
+    await store.disconnectSocialPage(now())
+    await audit(request, 'admin.facebook_page_disconnected')
+    return reply.code(204).send()
+  })
+
+  app.get('/api/admin/social/posts', { preHandler: requireAdmin }, async (request) => {
+    const posts = await store.listSocialPosts({ limit: 200 })
+    await audit(request, 'admin.social_posts_viewed')
+    return { posts }
+  })
+
+  app.get('/api/admin/social/posts/:id/image', {
+    preHandler: requireAdmin, schema: { params: idParams },
+  }, async (request, reply) => {
+    const image = await store.getSocialPostImage({ id: request.params.id })
+    if (!image || !socialStorage) return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'That post image was not found.' } })
+    const bytes = await socialStorage.download(image.driveFileId, 2 * 1024 * 1024)
+    await audit(request, 'admin.social_post_image_viewed', 'social_post', request.params.id)
+    return reply.type(image.mimeType).send(bytes)
+  })
+
+  app.post('/api/admin/social/posts/:id/remove', {
+    preHandler: requireAdmin, schema: { params: idParams },
+  }, async (request, reply) => {
+    if (!socialPublisher || !await socialPublisher.removePost(request.params.id)) {
+      return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'That published Facebook post was not found.' } })
+    }
+    await audit(request, 'admin.social_post_removed', 'social_post', request.params.id)
+    return reply.code(204).send()
   })
 }

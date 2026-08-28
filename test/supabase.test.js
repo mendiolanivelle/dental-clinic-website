@@ -119,6 +119,14 @@ test('the backend role stays least-privilege and the forward migration removes O
     new URL('../migrations/018_dentist_visit_completion.sql', import.meta.url),
     'utf8',
   )
+  const confirmedFollowUpSql = await readFile(
+    new URL('../migrations/021_confirmed_follow_up_scheduling.sql', import.meta.url),
+    'utf8',
+  )
+  const socialPublishingSql = await readFile(
+    new URL('../migrations/022_social_publishing.sql', import.meta.url),
+    'utf8',
+  )
   const compact = securitySql.replace(/\s+/g, ' ')
 
   assert.doesNotMatch(securitySql, /\bDELETE\b/)
@@ -208,6 +216,15 @@ test('the backend role stays least-privilege and the forward migration removes O
   assert.match(visitCompletionSql, /ADD COLUMN proposed_fee_cents integer/i)
   assert.match(visitCompletionSql, /appointments_dentist_completion_check/i)
   assert.doesNotMatch(visitCompletionSql, /\bDELETE\b/i)
+  assert.match(confirmedFollowUpSql, /appointments_patient_slot_active_idx/i)
+  assert.match(confirmedFollowUpSql, /status = 'scheduled', appointment_id = created_appointment_id/i)
+  assert.doesNotMatch(confirmedFollowUpSql, /\bDELETE\b/i)
+  assert.match(socialPublishingSql, /CREATE TABLE dental_portal\.social_posts/i)
+  assert.match(socialPublishingSql, /CREATE TABLE dental_portal\.social_post_consents/i)
+  assert.match(socialPublishingSql, /idempotency_key uuid UNIQUE NOT NULL/i)
+  assert.match(socialPublishingSql, /ENABLE ROW LEVEL SECURITY/i)
+  assert.doesNotMatch(socialPublishingSql, /\bDELETE\b/i)
+  assert.doesNotMatch(socialPublishingSql, /GRANT[^;]*\b(?:anon|authenticated|service_role)\b/i)
   assert.match(storeSql, /a\.dentist_done_at IS NOT NULL/i)
 })
 

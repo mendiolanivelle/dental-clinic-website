@@ -7,6 +7,7 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
+  Megaphone,
   ShieldCheck,
   UsersRound,
   X,
@@ -24,6 +25,7 @@ const receptionNavigation = [
 const dentistNavigation = [
   { label: 'Overview', to: '/dentist', icon: LayoutDashboard, end: true },
   { label: 'My patients', to: '/dentist/patients', icon: UsersRound },
+  { label: 'Facebook posts', to: '/dentist/social', icon: Megaphone },
 ]
 
 const initials = (name = '') =>

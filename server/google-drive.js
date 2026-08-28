@@ -51,10 +51,11 @@ export function createGoogleDriveStorage(config, { fetchFn = globalThis.fetch, n
   })
 
   return {
-    async upload({ bytes, mimeType }) {
+    async upload({ bytes, mimeType, prefix = 'prescription' }) {
       const boundary = `smilecare-${randomUUID()}`
+      const safePrefix = String(prefix).replace(/[^a-z0-9-]/giu, '-').slice(0, 40) || 'private-file'
       const metadata = JSON.stringify({
-        name: `prescription-${randomUUID()}.${mimeType === 'image/png' ? 'png' : mimeType === 'image/webp' ? 'webp' : 'jpg'}`,
+        name: `${safePrefix}-${randomUUID()}.${mimeType === 'image/png' ? 'png' : mimeType === 'image/webp' ? 'webp' : 'jpg'}`,
         parents: [folderId],
       })
       const body = Buffer.concat([
@@ -73,11 +74,11 @@ export function createGoogleDriveStorage(config, { fetchFn = globalThis.fetch, n
       return file.id
     },
 
-    async download(fileId) {
+    async download(fileId, maxBytes = 2 * 1024 * 1024) {
       const response = await authorizedFetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`)
       if (!response.ok) throw await googleError('Google Drive download', response)
       const bytes = Buffer.from(await response.arrayBuffer())
-      if (!bytes.length || bytes.length > 2 * 1024 * 1024) throw new Error('Google Drive returned an invalid prescription image')
+      if (!bytes.length || bytes.length > maxBytes) throw new Error('Google Drive returned an invalid private image')
       return bytes
     },
 

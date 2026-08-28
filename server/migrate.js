@@ -25,6 +25,11 @@ export const portalTableNames = [
   'prescriptions',
   'follow_up_recommendations',
   'audit_events',
+  'social_brand_settings',
+  'social_page_connections',
+  'social_posts',
+  'social_post_consents',
+  'social_post_events',
 ]
 
 export const migrationBootstrapSql = `
