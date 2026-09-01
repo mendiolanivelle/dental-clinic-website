@@ -108,6 +108,39 @@ export default function AdminSocialPage() {
     catch (error) { setActionError(error.message) } finally { setBusy('') }
   }
 
+  const addTemplates = async (event) => {
+    const files = [...(event.target.files || [])]
+    event.target.value = ''
+    const remaining = 5 - settings.templates.length
+    if (!files.length) return
+    if (files.length > remaining) {
+      setActionError(`You can add ${remaining} more template photo${remaining === 1 ? '' : 's'}.`)
+      return
+    }
+    setBusy('templates'); setActionError(''); setMessage('')
+    try {
+      for (const file of files) {
+        const image = await preparePrescriptionImage(file)
+        await api.addAdminSocialTemplate({ imageBase64: image.imageBase64, imageMimeType: image.imageMimeType })
+      }
+      setMessage('AI posting templates saved.')
+    } catch (error) {
+      setActionError(error.message || 'The template photos could not be saved.')
+    } finally {
+      await load()
+      setBusy('')
+    }
+  }
+
+  const removeTemplate = async (id) => {
+    setBusy(id); setActionError(''); setMessage('')
+    try {
+      await api.removeAdminSocialTemplate(id)
+      setMessage('Template photo removed.')
+      await load()
+    } catch (error) { setActionError(error.message) } finally { setBusy('') }
+  }
+
   const remove = async (post) => {
     if (!window.confirm('Remove this post from Facebook? Its internal audit history will be kept.')) return
     setBusy(post.id); setActionError('')
@@ -137,6 +170,11 @@ export default function AdminSocialPage() {
       <div className="mt-6 grid gap-5 md:grid-cols-2">
         <label className="text-xs font-extrabold">Clinic name<input className="input-field mt-2" maxLength="160" minLength="2" required value={form.clinicName} onChange={(event) => setForm({ ...form, clinicName: event.target.value })} /></label>
         <label className="text-xs font-extrabold">Logo image<input accept="image/jpeg,image/png,image/webp" className="mt-3 block w-full text-xs text-ink/55" type="file" onChange={(event) => setForm({ ...form, logoFile: event.target.files?.[0] || null })} /><span className="mt-1 block font-normal text-ink/40">{settings.hasLogo ? 'A logo is saved. Upload only to replace it.' : 'No logo saved yet.'}</span></label>
+        <div className="rounded-2xl bg-cream p-4 md:col-span-2">
+          <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-extrabold">AI posting templates</p><p className="mt-1 text-xs text-ink/45">Add up to 5 style references. Do not upload patient records or private information.</p></div><label className="cursor-pointer rounded-xl bg-brand px-4 py-2.5 text-xs font-extrabold text-white has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50">{busy === 'templates' ? 'Uploading…' : 'Add photos'}<input accept="image/jpeg,image/png,image/webp" className="sr-only" disabled={Boolean(busy) || settings.templates.length >= 5} multiple type="file" onChange={addTemplates} /></label></div>
+          <p className="mt-3 text-[11px] font-bold text-ink/40">{settings.templates.length}/5 photos</p>
+          {settings.templates.length > 0 && <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-5">{settings.templates.map((template) => <div className="relative overflow-hidden rounded-xl bg-white" key={template.id}><img alt="AI posting template" className="aspect-square w-full object-cover" src={`/api/admin/social/templates/${template.id}/image`} /><button aria-label="Remove template photo" className="absolute right-1.5 top-1.5 rounded-lg bg-white/95 p-2 text-[#914b22] shadow" disabled={Boolean(busy)} onClick={() => removeTemplate(template.id)} type="button"><Trash2 size={14} /></button></div>)}</div>}
+        </div>
         <label className="text-xs font-extrabold">Primary color<input className="mt-2 h-12 w-full rounded-xl border border-ink/10 bg-white p-1" type="color" value={form.primaryColor} onChange={(event) => setForm({ ...form, primaryColor: event.target.value })} /></label>
         <label className="text-xs font-extrabold">Secondary color<input className="mt-2 h-12 w-full rounded-xl border border-ink/10 bg-white p-1" type="color" value={form.secondaryColor} onChange={(event) => setForm({ ...form, secondaryColor: event.target.value })} /></label>
         <label className="text-xs font-extrabold">Brand font<select className="input-field mt-2" value={form.fontFamily} onChange={(event) => setForm({ ...form, fontFamily: event.target.value })}><option>Arial</option><option>Georgia</option><option>Verdana</option></select></label>
@@ -148,8 +186,6 @@ export default function AdminSocialPage() {
         <label className="text-xs font-extrabold md:col-span-2">Default hashtags<input className="input-field mt-2" placeholder="#DentalCare #ClinicName" value={form.defaultHashtags} onChange={(event) => setForm({ ...form, defaultHashtags: event.target.value })} /></label>
         <label className="text-xs font-extrabold md:col-span-2">Required disclaimer<textarea className="input-field mt-2 min-h-20" maxLength="500" value={form.requiredDisclaimer} onChange={(event) => setForm({ ...form, requiredDisclaimer: event.target.value })} /></label>
         <label className="text-xs font-extrabold md:col-span-2">Prohibited phrases — one per line<textarea className="input-field mt-2 min-h-28" value={form.prohibitedPhrases} onChange={(event) => setForm({ ...form, prohibitedPhrases: event.target.value })} /></label>
-        <label className="text-xs font-extrabold">Daily post limit<input className="input-field mt-2" max="25" min="1" required type="number" value={form.dailyPostLimit} onChange={(event) => setForm({ ...form, dailyPostLimit: event.target.value })} /></label>
-        <label className="text-xs font-extrabold">Weekly post limit<input className="input-field mt-2" max="100" min="1" required type="number" value={form.weeklyPostLimit} onChange={(event) => setForm({ ...form, weeklyPostLimit: event.target.value })} /></label>
       </div>
       <div className="mt-6 grid gap-3 rounded-2xl bg-cream p-4 sm:grid-cols-3"><label className="flex gap-2 text-xs font-bold"><input checked={form.patientPostsEnabled} type="checkbox" onChange={(event) => setForm({ ...form, patientPostsEnabled: event.target.checked })} /> Allow patient posts with specific consent</label><label className="flex gap-2 text-xs font-bold"><input checked={form.minorPostsEnabled} type="checkbox" onChange={(event) => setForm({ ...form, minorPostsEnabled: event.target.checked })} /> Allow approved guardian-consent workflow</label><label className="flex gap-2 text-xs font-bold"><input checked={form.automaticPublishingEnabled} type="checkbox" onChange={(event) => setForm({ ...form, automaticPublishingEnabled: event.target.checked })} /> Enable automatic publishing</label></div>
       <button className="mt-6 inline-flex items-center gap-2 rounded-xl bg-brand px-5 py-3 text-sm font-extrabold text-white disabled:opacity-50" disabled={busy === 'save'} type="submit"><Save size={16} />{busy === 'save' ? 'Saving…' : 'Save settings'}</button>

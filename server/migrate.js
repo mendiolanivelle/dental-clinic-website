@@ -30,6 +30,7 @@ export const portalTableNames = [
   'social_posts',
   'social_post_consents',
   'social_post_events',
+  'social_brand_templates',
 ]
 
 export const migrationBootstrapSql = `

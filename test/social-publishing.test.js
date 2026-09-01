@@ -35,20 +35,28 @@ const settings = {
   logoDriveFileId: null,
 }
 
-test('social publishing has no hourly window', async () => {
+test('social publishing has no time or volume window', async () => {
   const store = createStore({
     async query(sql) {
-      assert.doesNotMatch(sql, /posting_(?:start|end)_hour|current_hour/u)
-      return { rows: [{
-        automatic_publishing_enabled: true,
-        daily_post_limit: 3,
-        weekly_post_limit: 12,
-        daily_count: '0',
-        weekly_count: '0',
-      }] }
+      assert.doesNotMatch(sql, /posting_|current_hour|daily_post_limit|weekly_post_limit|daily_count|weekly_count|social_posts/u)
+      return { rows: [{ automatic_publishing_enabled: true }] }
     },
   })
   assert.deepEqual(await store.canPublishSocialPost(new Date('2026-09-02T00:30:00+08:00')), { allowed: true })
+})
+
+test('social template storage stops at five photos', async () => {
+  const store = createStore({
+    async transaction(run) {
+      return run({
+        async query(sql) {
+          if (sql.includes('count(*)')) return { rows: [{ count: 5 }] }
+          return { rows: [{ id: 1 }] }
+        },
+      })
+    },
+  })
+  assert.deepEqual(await store.addSocialTemplate({ driveFileId: 'sixth', mimeType: 'image/jpeg', now: new Date() }), { outcome: 'limit_reached' })
 })
 
 test('social event details type string parameters for PostgreSQL JSON', async () => {
@@ -93,7 +101,7 @@ test('social photos are normalized below 2 MB and the worker publishes only once
   assert.equal(metadata.orientation, undefined)
 
   const key = Buffer.alloc(32, 9)
-  const files = new Map([['original', normalized]])
+  const files = new Map([['original', normalized], ['template', normalized]])
   let claimed = false
   let metaCalls = 0
   let resolvePublished
@@ -103,7 +111,8 @@ test('social photos are normalized below 2 MB and the worker publishes only once
     async getSocialPostForProcessing() {
       return {
         id: 'post-1', contentType: 'educational', description: 'Welcome our clinic team.',
-        patientId: null, patientName: null, settings,
+        patientId: null, patientName: null,
+        settings: { ...settings, templates: [{ id: 'template-1', driveFileId: 'template', mimeType: 'image/jpeg' }] },
         originalImage: { driveFileId: 'original', mimeType: 'image/jpeg' },
         connection: {
           pageId: '12345', pageName: 'SmileCare', status: 'connected',
@@ -141,6 +150,7 @@ test('social photos are normalized below 2 MB and the worker publishes only once
       const request = JSON.parse(options?.body || '{}')
       assert.deepEqual(request.provider.only, ['google-vertex'])
       assert.equal(request.provider.zdr, true)
+      assert.equal(request.input_references.length, 2)
       return Response.json({ error: { message: 'Gemini could not generate an image (STOP)' } }, { status: 502 })
     }
     if (url.endsWith('/12345/photos')) { metaCalls += 1; return Response.json({ post_id: '12345_67890' }) }

@@ -185,13 +185,17 @@ async function moderate({ config, fetchFn, caption, mimeType, imageBytes }) {
   }
 }
 
-async function enhanceImage({ config, fetchFn, job, analysis, imageBytes }) {
+async function enhanceImage({ config, fetchFn, storage, job, analysis, imageBytes }) {
   const mayUseGenerativeEdit = !analysis.patient_visible
     && !analysis.clinical_image
     && !clinicalContent.has(job.contentType)
     && job.contentType !== 'clinic_team'
   if (!mayUseGenerativeEdit) return imageBytes
   try {
+    const templateReferences = await Promise.all((job.settings.templates || []).slice(0, 5).map(async (template) => ({
+      type: 'image_url',
+      image_url: { url: `data:${template.mimeType};base64,${(await storage.download(template.driveFileId, MAX_IMAGE_BYTES)).toString('base64')}` },
+    })))
     const response = await fetchFn('https://openrouter.ai/api/v1/images', {
       method: 'POST',
       headers: {
@@ -202,11 +206,11 @@ async function enhanceImage({ config, fetchFn, job, analysis, imageBytes }) {
       },
       body: JSON.stringify({
         model: config.openRouterImageModel,
-        prompt: 'Improve lighting, white balance, framing, and background cleanliness for a professional dental clinic Facebook post. Preserve every real object and all people exactly. Do not add text, logos, teeth, people, treatment results, equipment, awards, or claims. Do not alter anatomy or create a different event.',
+        prompt: 'The first image is the source post photo. Improve its lighting, white balance, framing, and background cleanliness. Any remaining images are clinic style and layout references only: follow their visual feel without copying people, private data, or readable text. Preserve every real object and all people in the source exactly. Do not add text, logos, teeth, people, treatment results, equipment, awards, or claims. Do not alter anatomy or create a different event.',
         input_references: [{
           type: 'image_url',
           image_url: { url: `data:${job.originalImage.mimeType};base64,${imageBytes.toString('base64')}` },
-        }],
+        }, ...templateReferences],
         provider: privateOpenRouterProvider,
       }),
     })
@@ -297,7 +301,7 @@ export function createSocialPublisher({ config, store, storage, fetchFn = global
       const analysis = await analyzeAndWrite({ config, fetchFn, job, imageBytes: original })
       assertSocialPostPublishable(job, analysis, analysis.caption)
       await moderate({ config, fetchFn, caption: analysis.caption, mimeType: job.originalImage.mimeType, imageBytes: original })
-      const enhanced = await enhanceImage({ config, fetchFn, job, analysis, imageBytes: original })
+      const enhanced = await enhanceImage({ config, fetchFn, storage, job, analysis, imageBytes: original })
       const branded = await applyBranding({ storage, settings: job.settings, imageBytes: enhanced })
       if (!branded.length || branded.length > MAX_IMAGE_BYTES) throw new SocialBlockedError('The final branded image could not be compressed below 2 MB.')
       finalDriveFileId = await storage.upload({ bytes: branded, mimeType: 'image/jpeg', prefix: 'social-final' })

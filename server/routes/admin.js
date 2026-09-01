@@ -197,6 +197,7 @@ export default async function adminRoutes(app, {
     ...settings,
     logoDriveFileId: undefined,
     logoMimeType: undefined,
+    templates: settings.templates.map(({ id, mimeType }) => ({ id, mimeType })),
     integrationConfigured: Boolean(socialPublisher?.configured),
     aiConfigured: Boolean(config.openRouterApiKey),
     tokenEncryptionConfigured: Boolean(config.socialTokenEncryptionKey),
@@ -207,6 +208,58 @@ export default async function adminRoutes(app, {
     const settings = await store.getSocialSettings()
     await audit(request, 'admin.social_settings_viewed')
     return { settings: publicSocialSettings(settings) }
+  })
+
+  app.post('/api/admin/social/templates', {
+    preHandler: requireAdmin,
+    bodyLimit: 3 * 1024 * 1024,
+    schema: {
+      body: {
+        type: 'object', additionalProperties: false,
+        required: ['imageBase64', 'imageMimeType'],
+        properties: {
+          imageBase64: { type: 'string', minLength: 4, maxLength: 2_800_000 },
+          imageMimeType: { type: 'string', enum: Object.keys(socialImageSignatures) },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    if (!socialStorage) return reply.code(503).send({ error: { code: 'STORAGE_NOT_CONFIGURED', message: 'Private image storage is not configured.' } })
+    const bytes = decodeSocialImage(request.body)
+    if (!bytes) return reply.code(400).send({ error: { code: 'INVALID_TEMPLATE', message: 'Upload a valid template image up to 2 MB.' } })
+    const driveFileId = await socialStorage.upload({ bytes, mimeType: request.body.imageMimeType, prefix: 'social-template' })
+    try {
+      const result = await store.addSocialTemplate({ driveFileId, mimeType: request.body.imageMimeType, now: now() })
+      if (result.outcome === 'limit_reached') {
+        await socialStorage.remove(driveFileId)
+        return reply.code(409).send({ error: { code: 'TEMPLATE_LIMIT', message: 'You can save up to 5 template photos.' } })
+      }
+      await audit(request, 'admin.social_template_added', 'social_brand_template', result.template.id)
+      return reply.code(201).send({ template: { id: result.template.id, mimeType: result.template.mimeType } })
+    } catch (error) {
+      await socialStorage.remove(driveFileId)
+      throw error
+    }
+  })
+
+  app.get('/api/admin/social/templates/:id/image', {
+    preHandler: requireAdmin, schema: { params: idParams },
+  }, async (request, reply) => {
+    const template = await store.getSocialTemplate(request.params.id)
+    if (!template || !socialStorage) return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'That template image was not found.' } })
+    const bytes = await socialStorage.download(template.driveFileId, 2 * 1024 * 1024)
+    await audit(request, 'admin.social_template_viewed', 'social_brand_template', template.id)
+    return reply.type(template.mimeType).send(bytes)
+  })
+
+  app.delete('/api/admin/social/templates/:id', {
+    preHandler: requireAdmin, schema: { params: idParams },
+  }, async (request, reply) => {
+    const driveFileId = await store.removeSocialTemplate(request.params.id)
+    if (!driveFileId) return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'That template image was not found.' } })
+    await socialStorage?.remove(driveFileId)
+    await audit(request, 'admin.social_template_removed', 'social_brand_template', request.params.id)
+    return reply.code(204).send()
   })
 
   app.put('/api/admin/social/settings', {
@@ -270,7 +323,7 @@ export default async function adminRoutes(app, {
     }
     try {
       const clean = (value) => value?.trim() || null
-      const settings = await store.updateSocialSettings({
+      await store.updateSocialSettings({
         ...request.body,
         clinicName: request.body.clinicName.trim(),
         brandVoice: request.body.brandVoice.trim(),
@@ -284,6 +337,7 @@ export default async function adminRoutes(app, {
         logoMimeType,
       }, now())
       if (logoDriveFileId && current.logoDriveFileId) await socialStorage.remove(current.logoDriveFileId)
+      const settings = await store.getSocialSettings()
       await audit(request, 'admin.social_settings_updated')
       return { settings: publicSocialSettings(settings) }
     } catch (error) {

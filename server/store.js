@@ -145,6 +145,11 @@ const socialSettingsFromRow = (row) => ({
   hasLogo: Boolean(row.logo_drive_file_id),
   logoDriveFileId: row.logo_drive_file_id,
   logoMimeType: row.logo_mime_type,
+  templates: (row.template_images || []).map((template) => ({
+    id: template.id,
+    driveFileId: template.driveFileId,
+    mimeType: template.mimeType,
+  })),
   page: row.page_id ? {
     id: row.page_id,
     name: row.page_name,
@@ -1195,12 +1200,50 @@ export function createStore(db) {
 
     async getSocialSettings() {
       const result = await db.query(
-        `SELECT s.*, c.page_id, c.page_name, c.connection_status
+        `SELECT s.*, c.page_id, c.page_name, c.connection_status,
+                coalesce((
+                  SELECT jsonb_agg(jsonb_build_object(
+                    'id', t.id, 'driveFileId', t.drive_file_id, 'mimeType', t.mime_type
+                  ) ORDER BY t.created_at, t.id)
+                  FROM social_brand_templates t WHERE t.settings_id = s.id
+                ), '[]'::jsonb) AS template_images
          FROM social_brand_settings s
          LEFT JOIN social_page_connections c ON c.id = 1
          WHERE s.id = 1`,
       )
       return socialSettingsFromRow(result.rows[0])
+    },
+
+    async addSocialTemplate({ driveFileId, mimeType, now }) {
+      return db.transaction(async (client) => {
+        await client.query('SELECT id FROM social_brand_settings WHERE id = 1 FOR UPDATE')
+        const count = await client.query('SELECT count(*)::integer AS count FROM social_brand_templates WHERE settings_id = 1')
+        if (count.rows[0].count >= 5) return { outcome: 'limit_reached' }
+        const inserted = await client.query(
+          `INSERT INTO social_brand_templates (settings_id, drive_file_id, mime_type, created_at)
+           VALUES (1, $1, $2, $3) RETURNING id, drive_file_id, mime_type`,
+          [driveFileId, mimeType, now],
+        )
+        const row = inserted.rows[0]
+        return { outcome: 'created', template: { id: row.id, driveFileId: row.drive_file_id, mimeType: row.mime_type } }
+      })
+    },
+
+    async getSocialTemplate(id) {
+      const result = await db.query(
+        'SELECT id, drive_file_id, mime_type FROM social_brand_templates WHERE id = $1',
+        [id],
+      )
+      const row = result.rows[0]
+      return row ? { id: row.id, driveFileId: row.drive_file_id, mimeType: row.mime_type } : null
+    },
+
+    async removeSocialTemplate(id) {
+      const result = await db.query(
+        'DELETE FROM social_brand_templates WHERE id = $1 RETURNING drive_file_id',
+        [id],
+      )
+      return result.rows[0]?.drive_file_id || null
     },
 
     async updateSocialSettings(settings, now) {
@@ -1372,7 +1415,13 @@ export function createStore(db) {
                 s.*, c.page_id, c.page_name, c.encrypted_access_token,
                 c.connection_status, consent.consent_evidence,
                 consent.covers_public_social_media, consent.covers_ai_processing,
-                consent.subject_is_minor, consent.guardian_name, consent.granted_at
+                consent.subject_is_minor, consent.guardian_name, consent.granted_at,
+                coalesce((
+                  SELECT jsonb_agg(jsonb_build_object(
+                    'id', t.id, 'driveFileId', t.drive_file_id, 'mimeType', t.mime_type
+                  ) ORDER BY t.created_at, t.id)
+                  FROM social_brand_templates t WHERE t.settings_id = s.id
+                ), '[]'::jsonb) AS template_images
          FROM social_posts p
          CROSS JOIN social_brand_settings s
          LEFT JOIN social_page_connections c ON c.id = 1
@@ -1428,25 +1477,12 @@ export function createStore(db) {
       })
     },
 
-    async canPublishSocialPost(now) {
+    async canPublishSocialPost() {
       const result = await db.query(
-        `SELECT s.automatic_publishing_enabled, s.daily_post_limit, s.weekly_post_limit,
-                count(p.id) FILTER (
-                  WHERE p.published_at >= date_trunc('day', $1 AT TIME ZONE 'Asia/Manila') AT TIME ZONE 'Asia/Manila'
-                ) AS daily_count,
-                count(p.id) FILTER (
-                  WHERE p.published_at >= date_trunc('week', $1 AT TIME ZONE 'Asia/Manila') AT TIME ZONE 'Asia/Manila'
-                ) AS weekly_count
-         FROM social_brand_settings s
-         LEFT JOIN social_posts p ON p.status = 'published'
-         WHERE s.id = 1
-         GROUP BY s.id`,
-        [now],
+        'SELECT automatic_publishing_enabled FROM social_brand_settings WHERE id = 1',
       )
       const row = result.rows[0]
       if (!row.automatic_publishing_enabled) return { allowed: false, reason: 'Automatic publishing is disabled by the super admin.' }
-      if (Number(row.daily_count) >= row.daily_post_limit) return { allowed: false, reason: 'The daily Facebook post limit has been reached.' }
-      if (Number(row.weekly_count) >= row.weekly_post_limit) return { allowed: false, reason: 'The weekly Facebook post limit has been reached.' }
       return { allowed: true }
     },
 
