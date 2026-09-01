@@ -1475,7 +1475,7 @@ export function createStore(db) {
         )
         await client.query(
           `INSERT INTO social_post_events (social_post_id, event_type, previous_status, new_status, actor_type, details)
-           VALUES ($1, 'facebook_published', 'publishing', 'published', 'provider', jsonb_build_object('externalPostId', $2))`,
+           VALUES ($1, 'facebook_published', 'publishing', 'published', 'provider', jsonb_build_object('externalPostId', $2::text))`,
           [id, externalPostId],
         )
       })
@@ -1490,7 +1490,7 @@ export function createStore(db) {
       )
       await db.query(
         `INSERT INTO social_post_events (social_post_id, event_type, new_status, actor_type, details)
-         VALUES ($1, 'automatic_validation_blocked', 'blocked', 'system', jsonb_build_object('reason', $2))`,
+         VALUES ($1, 'automatic_validation_blocked', 'blocked', 'system', jsonb_build_object('reason', $2::text))`,
         [id, reason],
       )
     },

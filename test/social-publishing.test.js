@@ -51,6 +51,21 @@ test('social publishing has no hourly window', async () => {
   assert.deepEqual(await store.canPublishSocialPost(new Date('2026-09-02T00:30:00+08:00')), { allowed: true })
 })
 
+test('social event details type string parameters for PostgreSQL JSON', async () => {
+  const queries = []
+  const db = {
+    async query(sql) { queries.push(sql) },
+    async transaction(run) { return run({ query: async (sql) => { queries.push(sql) } }) },
+  }
+  const store = createStore(db)
+  const now = new Date()
+  await store.markSocialPostPublished({ id: 'post-1', externalPostId: 'page_post', externalPostUrl: 'https://facebook.com/page_post', now })
+  await store.markSocialPostBlocked('post-2', 'Private data detected.', now)
+  const eventQueries = queries.filter((sql) => sql.includes('jsonb_build_object'))
+  assert.equal(eventQueries.length, 2)
+  assert.ok(eventQueries.every((sql) => sql.includes('$2::text')))
+})
+
 test('social tokens are encrypted and patient posts fail closed without specific consent', () => {
   const key = Buffer.alloc(32, 4)
   const encrypted = encryptSocialToken('page-secret-token', key, () => Buffer.alloc(12, 7))
