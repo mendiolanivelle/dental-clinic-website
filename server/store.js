@@ -576,25 +576,46 @@ export function createStore(db) {
 
   const loadAdminMetrics = async ({ from, to, dentistId, serviceId, now }) => {
     const result = await db.query(
-      `WITH selected_appointments AS (
-         SELECT a.id, a.status
+      `WITH visit_counts AS (
+         SELECT count(*) FILTER (
+                  WHERE coalesce(a.dentist_done_at, CASE WHEN a.status = 'completed' THEN a.starts_at END)
+                    >= ($1::date AT TIME ZONE 'Asia/Manila')
+                    AND coalesce(a.dentist_done_at, CASE WHEN a.status = 'completed' THEN a.starts_at END)
+                    < (($2::date + 1) AT TIME ZONE 'Asia/Manila')
+                ) AS completed_visits,
+                count(*) FILTER (
+                  WHERE a.status = 'cancelled'
+                    AND a.starts_at >= ($1::date AT TIME ZONE 'Asia/Manila')
+                    AND a.starts_at < (($2::date + 1) AT TIME ZONE 'Asia/Manila')
+                ) AS cancelled_visits,
+                count(*) FILTER (
+                  WHERE a.status = 'no_show'
+                    AND a.starts_at >= ($1::date AT TIME ZONE 'Asia/Manila')
+                    AND a.starts_at < (($2::date + 1) AT TIME ZONE 'Asia/Manila')
+                ) AS no_show_visits
          FROM appointments a
-         WHERE a.starts_at >= ($1::date AT TIME ZONE 'Asia/Manila')
-           AND a.starts_at < (($2::date + 1) AT TIME ZONE 'Asia/Manila')
-           AND ($3::uuid IS NULL OR a.dentist_id = $3)
+         WHERE ($3::uuid IS NULL OR a.dentist_id = $3)
            AND ($4::uuid IS NULL OR a.appointment_type_id = $4)
        ), billed AS (
          SELECT coalesce(sum(c.subtotal_cents), 0) AS gross_billed_cents,
                 coalesce(sum(c.discount_cents), 0) AS discounts_cents,
                 coalesce(sum(c.total_cents), 0) AS net_billed_cents,
-                count(*) FILTER (WHERE a.status = 'completed') AS completed_charged_visits
-         FROM selected_appointments a
-         JOIN patient_charges c ON c.appointment_id = a.id
+                count(DISTINCT c.appointment_id) AS completed_charged_visits
+         FROM patient_charges c
+         JOIN appointments a ON a.id = c.appointment_id
+         WHERE c.created_at >= ($1::date AT TIME ZONE 'Asia/Manila')
+           AND c.created_at < (($2::date + 1) AT TIME ZONE 'Asia/Manila')
+           AND ($3::uuid IS NULL OR a.dentist_id = $3)
+           AND ($4::uuid IS NULL OR a.appointment_type_id = $4)
        ), cohort_paid AS (
          SELECT coalesce(sum(p.amount_cents), 0) AS cohort_paid_cents
-         FROM selected_appointments a
-         JOIN patient_charges c ON c.appointment_id = a.id
+         FROM patient_charges c
+         JOIN appointments a ON a.id = c.appointment_id
          JOIN patient_payments p ON p.charge_id = c.id AND p.status = 'posted'
+         WHERE c.created_at >= ($1::date AT TIME ZONE 'Asia/Manila')
+           AND c.created_at < (($2::date + 1) AT TIME ZONE 'Asia/Manila')
+           AND ($3::uuid IS NULL OR a.dentist_id = $3)
+           AND ($4::uuid IS NULL OR a.appointment_type_id = $4)
        ), cash AS (
          SELECT coalesce(sum(p.amount_cents), 0) AS cash_collected_cents
          FROM patient_payments p
@@ -605,13 +626,6 @@ export function createStore(db) {
            AND p.received_at < (($2::date + 1) AT TIME ZONE 'Asia/Manila')
            AND ($3::uuid IS NULL OR a.dentist_id = $3)
            AND ($4::uuid IS NULL OR a.appointment_type_id = $4)
-       ), visit_counts AS (
-         SELECT count(*) FILTER (WHERE status = 'completed') AS completed_visits,
-                count(*) FILTER (WHERE status = 'cancelled') AS cancelled_visits,
-                count(*) FILTER (WHERE status = 'no_show') AS no_show_visits,
-                count(*) FILTER (WHERE status IN ('completed', 'cancelled', 'no_show')) AS finalized_visits,
-                count(*) AS appointment_points
-         FROM selected_appointments
        ), outstanding AS (
          SELECT coalesce(sum(greatest(c.total_cents - coalesce(paid.amount_cents, 0), 0)), 0) AS outstanding_cents
          FROM patient_charges c
@@ -623,7 +637,9 @@ export function createStore(db) {
          WHERE ($3::uuid IS NULL OR a.dentist_id = $3)
            AND ($4::uuid IS NULL OR a.appointment_type_id = $4)
        )
-       SELECT billed.*, cohort_paid.*, cash.*, visit_counts.*, outstanding.*,
+       SELECT billed.*, cohort_paid.*, cash.*, visit_counts.*,
+              (visit_counts.completed_visits + visit_counts.cancelled_visits + visit_counts.no_show_visits) AS finalized_visits,
+              outstanding.*,
               (SELECT count(*) FROM patients
                WHERE created_at >= ($1::date AT TIME ZONE 'Asia/Manila')
                  AND created_at < (($2::date + 1) AT TIME ZONE 'Asia/Manila')) AS new_patient_profiles,
@@ -631,7 +647,8 @@ export function createStore(db) {
                WHERE a.starts_at > $5 AND a.status IN ('scheduled', 'confirmed')
                  AND ($3::uuid IS NULL OR a.dentist_id = $3)
                  AND ($4::uuid IS NULL OR a.appointment_type_id = $4)) AS scheduled_future_visits,
-              (visit_counts.appointment_points + billed.completed_charged_visits
+              (visit_counts.completed_visits + visit_counts.cancelled_visits + visit_counts.no_show_visits
+               + billed.completed_charged_visits
                + CASE WHEN cash.cash_collected_cents > 0 THEN 1 ELSE 0 END) AS data_points
        FROM billed, cohort_paid, cash, visit_counts, outstanding`,
       [from, to, dentistId, serviceId, now],
@@ -641,16 +658,27 @@ export function createStore(db) {
 
   const loadAdminTrend = async ({ from, to, dentistId, serviceId }) => {
     const result = await db.query(
-      `WITH days AS (
+       `WITH days AS (
          SELECT generate_series($1::date, $2::date, interval '1 day')::date AS day
        ), visits AS (
-         SELECT (a.starts_at AT TIME ZONE 'Asia/Manila')::date AS day,
-                count(*) FILTER (WHERE a.status = 'completed') AS completed_visits,
-                coalesce(sum(c.total_cents), 0) AS net_billed_cents
+         SELECT (coalesce(a.dentist_done_at, CASE WHEN a.status = 'completed' THEN a.starts_at END)
+                  AT TIME ZONE 'Asia/Manila')::date AS day,
+                count(*) AS completed_visits
          FROM appointments a
-         LEFT JOIN patient_charges c ON c.appointment_id = a.id
-         WHERE a.starts_at >= ($1::date AT TIME ZONE 'Asia/Manila')
-           AND a.starts_at < (($2::date + 1) AT TIME ZONE 'Asia/Manila')
+         WHERE coalesce(a.dentist_done_at, CASE WHEN a.status = 'completed' THEN a.starts_at END)
+                 >= ($1::date AT TIME ZONE 'Asia/Manila')
+           AND coalesce(a.dentist_done_at, CASE WHEN a.status = 'completed' THEN a.starts_at END)
+                 < (($2::date + 1) AT TIME ZONE 'Asia/Manila')
+           AND ($3::uuid IS NULL OR a.dentist_id = $3)
+           AND ($4::uuid IS NULL OR a.appointment_type_id = $4)
+         GROUP BY 1
+       ), billed AS (
+         SELECT (c.created_at AT TIME ZONE 'Asia/Manila')::date AS day,
+                sum(c.total_cents) AS net_billed_cents
+         FROM patient_charges c
+         JOIN appointments a ON a.id = c.appointment_id
+         WHERE c.created_at >= ($1::date AT TIME ZONE 'Asia/Manila')
+           AND c.created_at < (($2::date + 1) AT TIME ZONE 'Asia/Manila')
            AND ($3::uuid IS NULL OR a.dentist_id = $3)
            AND ($4::uuid IS NULL OR a.appointment_type_id = $4)
          GROUP BY 1
@@ -668,9 +696,9 @@ export function createStore(db) {
          GROUP BY 1
        )
        SELECT days.day, coalesce(visits.completed_visits, 0) AS completed_visits,
-              coalesce(visits.net_billed_cents, 0) AS net_billed_cents,
+              coalesce(billed.net_billed_cents, 0) AS net_billed_cents,
               coalesce(cash.cash_collected_cents, 0) AS cash_collected_cents
-       FROM days LEFT JOIN visits USING (day) LEFT JOIN cash USING (day)
+       FROM days LEFT JOIN visits USING (day) LEFT JOIN billed USING (day) LEFT JOIN cash USING (day)
        ORDER BY days.day`,
       [from, to, dentistId, serviceId],
     )
@@ -897,35 +925,74 @@ export function createStore(db) {
         comparisonInput ? loadAdminTrend(comparisonInput) : [],
         db.query(
           `SELECT t.id, t.name,
-                  count(*) FILTER (WHERE a.status = 'completed') AS completed_visits,
-                  coalesce(sum(c.total_cents) FILTER (WHERE a.status = 'completed'), 0) AS net_billed_cents
+                  coalesce(v.completed_visits, 0) AS completed_visits,
+                  coalesce(b.net_billed_cents, 0) AS net_billed_cents
            FROM appointment_types t
-           LEFT JOIN appointments a ON a.appointment_type_id = t.id
-             AND a.starts_at >= ($1::date AT TIME ZONE 'Asia/Manila')
-             AND a.starts_at < (($2::date + 1) AT TIME ZONE 'Asia/Manila')
-             AND ($3::uuid IS NULL OR a.dentist_id = $3)
-           LEFT JOIN patient_charges c ON c.appointment_id = a.id
+           LEFT JOIN (
+             SELECT a.appointment_type_id, count(*) AS completed_visits
+             FROM appointments a
+             WHERE coalesce(a.dentist_done_at, CASE WHEN a.status = 'completed' THEN a.starts_at END)
+                     >= ($1::date AT TIME ZONE 'Asia/Manila')
+               AND coalesce(a.dentist_done_at, CASE WHEN a.status = 'completed' THEN a.starts_at END)
+                     < (($2::date + 1) AT TIME ZONE 'Asia/Manila')
+               AND ($3::uuid IS NULL OR a.dentist_id = $3)
+             GROUP BY a.appointment_type_id
+           ) v ON v.appointment_type_id = t.id
+           LEFT JOIN (
+             SELECT a.appointment_type_id, sum(c.total_cents) AS net_billed_cents
+             FROM patient_charges c
+             JOIN appointments a ON a.id = c.appointment_id
+             WHERE c.created_at >= ($1::date AT TIME ZONE 'Asia/Manila')
+               AND c.created_at < (($2::date + 1) AT TIME ZONE 'Asia/Manila')
+               AND ($3::uuid IS NULL OR a.dentist_id = $3)
+             GROUP BY a.appointment_type_id
+           ) b ON b.appointment_type_id = t.id
            WHERE ($4::uuid IS NULL OR t.id = $4)
-           GROUP BY t.id, t.name
            ORDER BY completed_visits DESC, t.name ASC`,
           [from, to, dentistId, serviceId],
         ),
         db.query(
           `SELECT d.id, d.display_name, d.specialty, d.active,
-                  count(*) FILTER (WHERE a.status = 'completed') AS completed_visits,
-                  count(*) FILTER (WHERE a.status IN ('scheduled', 'confirmed') AND a.starts_at > $5) AS upcoming_visits,
-                  count(*) FILTER (WHERE a.status = 'cancelled') AS cancelled_visits,
-                  count(*) FILTER (WHERE a.status = 'no_show') AS no_show_visits,
-                  coalesce(sum(c.total_cents) FILTER (WHERE a.status = 'completed'), 0) AS net_billed_cents
+                  coalesce(v.completed_visits, 0) AS completed_visits,
+                  coalesce(u.upcoming_visits, 0) AS upcoming_visits,
+                  coalesce(v.cancelled_visits, 0) AS cancelled_visits,
+                  coalesce(v.no_show_visits, 0) AS no_show_visits,
+                  coalesce(b.net_billed_cents, 0) AS net_billed_cents
            FROM dentists d
            JOIN staff_profiles ds ON ds.dentist_id = d.id AND ds.role = 'dentist'
-           LEFT JOIN appointments a ON a.dentist_id = d.id
-             AND a.starts_at >= ($1::date AT TIME ZONE 'Asia/Manila')
-             AND a.starts_at < (($2::date + 1) AT TIME ZONE 'Asia/Manila')
-             AND ($4::uuid IS NULL OR a.appointment_type_id = $4)
-           LEFT JOIN patient_charges c ON c.appointment_id = a.id
+           LEFT JOIN (
+             SELECT a.dentist_id,
+                    count(*) FILTER (
+                      WHERE coalesce(a.dentist_done_at, CASE WHEN a.status = 'completed' THEN a.starts_at END)
+                        >= ($1::date AT TIME ZONE 'Asia/Manila')
+                        AND coalesce(a.dentist_done_at, CASE WHEN a.status = 'completed' THEN a.starts_at END)
+                        < (($2::date + 1) AT TIME ZONE 'Asia/Manila')
+                    ) AS completed_visits,
+                    count(*) FILTER (WHERE a.status = 'cancelled') AS cancelled_visits,
+                    count(*) FILTER (WHERE a.status = 'no_show') AS no_show_visits
+             FROM appointments a
+             WHERE (coalesce(a.dentist_done_at, a.starts_at) >= ($1::date AT TIME ZONE 'Asia/Manila')
+                    AND coalesce(a.dentist_done_at, a.starts_at) < (($2::date + 1) AT TIME ZONE 'Asia/Manila'))
+               AND ($4::uuid IS NULL OR a.appointment_type_id = $4)
+             GROUP BY a.dentist_id
+           ) v ON v.dentist_id = d.id
+           LEFT JOIN (
+             SELECT a.dentist_id, count(*) AS upcoming_visits
+             FROM appointments a
+             WHERE a.status IN ('scheduled', 'confirmed') AND a.starts_at > $5
+               AND ($4::uuid IS NULL OR a.appointment_type_id = $4)
+             GROUP BY a.dentist_id
+           ) u ON u.dentist_id = d.id
+           LEFT JOIN (
+             SELECT a.dentist_id, sum(c.total_cents) AS net_billed_cents
+             FROM patient_charges c
+             JOIN appointments a ON a.id = c.appointment_id
+             WHERE c.created_at >= ($1::date AT TIME ZONE 'Asia/Manila')
+               AND c.created_at < (($2::date + 1) AT TIME ZONE 'Asia/Manila')
+               AND ($4::uuid IS NULL OR a.appointment_type_id = $4)
+             GROUP BY a.dentist_id
+           ) b ON b.dentist_id = d.id
            WHERE ($3::uuid IS NULL OR d.id = $3)
-           GROUP BY d.id, d.display_name, d.specialty, d.active
            ORDER BY completed_visits DESC, d.display_name ASC`,
           [from, to, dentistId, serviceId, now],
         ),
@@ -1943,11 +2010,10 @@ export function createStore(db) {
            LEFT JOIN patient_charges c ON c.appointment_id = a.id
            WHERE a.status IN ('scheduled', 'confirmed')
              AND a.dentist_done_at IS NOT NULL
-             AND (a.starts_at AT TIME ZONE 'Asia/Manila')::date = $1::date
              AND c.id IS NULL
-           ORDER BY a.starts_at ASC
+           ORDER BY a.dentist_done_at ASC
            LIMIT 100`,
-          [date],
+          [],
         ),
         loadCharges(db, 'true', [], true),
         db.query(

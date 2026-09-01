@@ -32,7 +32,7 @@ export function manilaToday(now) {
 
 export function resolveAdminPeriod(query, now) {
   const today = parseDate(manilaToday(now))
-  const defaultFrom = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1))
+  const defaultFrom = addDays(today, -29)
   const from = parseDate(query.from || formatDate(defaultFrom))
   const to = parseDate(query.to || formatDate(today))
   const compare = query.compare || 'previous_period'

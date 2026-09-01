@@ -226,6 +226,8 @@ test('the backend role stays least-privilege and the forward migration removes O
   assert.doesNotMatch(socialPublishingSql, /\bDELETE\b/i)
   assert.doesNotMatch(socialPublishingSql, /GRANT[^;]*\b(?:anon|authenticated|service_role)\b/i)
   assert.match(storeSql, /a\.dentist_done_at IS NOT NULL/i)
+  assert.match(storeSql, /coalesce\(a\.dentist_done_at, CASE WHEN a\.status = 'completed' THEN a\.starts_at END\)/i)
+  assert.match(storeSql, /WHERE c\.created_at >= \(\$1::date AT TIME ZONE 'Asia\/Manila'\)/i)
 })
 
 test('production permits Supabase direct/session connections and rejects other hosts or transaction pooling', () => {
