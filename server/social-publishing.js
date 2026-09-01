@@ -17,15 +17,25 @@ const xml = (value = '') => String(value)
   .replaceAll('"', '&quot;')
   .replaceAll("'", '&apos;')
 
-const responseText = (payload) => payload?.output
-  ?.flatMap((item) => item.content || [])
-  .find((item) => item.type === 'output_text')?.text
-
-const openAiError = async (label, response) => {
+const openRouterError = async (label, response) => {
   const payload = await response.json().catch(() => null)
   const message = payload?.error?.message || `HTTP ${response.status}`
   const ErrorType = response.status === 429 || response.status >= 500 ? Error : SocialPermanentError
   return new ErrorType(`${label} failed: ${message}`)
+}
+
+const openRouterText = (payload) => {
+  const message = payload?.choices?.[0]?.message
+  if (message?.refusal) throw new SocialBlockedError('OpenRouter safety filters blocked this image or caption.')
+  return typeof message?.content === 'string' ? message.content : null
+}
+
+const privateOpenRouterProvider = {
+  only: ['google-vertex'],
+  zdr: true,
+  data_collection: 'deny',
+  require_parameters: true,
+  allow_fallbacks: false,
 }
 
 const parseJsonOutput = (text) => {
@@ -33,8 +43,32 @@ const parseJsonOutput = (text) => {
   try {
     return JSON.parse(cleaned)
   } catch {
-    throw new Error('OpenAI returned an invalid content validation result.')
+    throw new Error('OpenRouter returned an invalid content validation result.')
   }
+}
+
+async function openRouterJson({ config, fetchFn, label, prompt, mimeType, imageBytes, schema }) {
+  const response = await fetchFn('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${config.openRouterApiKey}`,
+      'content-type': 'application/json',
+      'http-referer': config.publicOrigin,
+      'x-openrouter-title': 'SmileCare Dental Clinic',
+    },
+    body: JSON.stringify({
+      model: config.openRouterTextModel,
+      messages: [{ role: 'user', content: [
+        { type: 'text', text: prompt },
+        { type: 'image_url', image_url: { url: `data:${mimeType};base64,${imageBytes.toString('base64')}` } },
+      ] }],
+      provider: privateOpenRouterProvider,
+      max_tokens: 4096,
+      response_format: { type: 'json_schema', json_schema: { name: 'social_review', strict: true, schema } },
+    }),
+  })
+  if (!response.ok) throw await openRouterError(label, response)
+  return parseJsonOutput(openRouterText(await response.json()))
 }
 
 export const encryptSocialToken = (token, key, randomBytesFn = randomBytes) => {
@@ -101,8 +135,7 @@ export const assertSocialPostPublishable = (job, analysis, caption) => {
 }
 
 async function analyzeAndWrite({ config, fetchFn, job, imageBytes }) {
-  if (!config.openAiApiKey) throw new SocialPermanentError('OpenAI is not configured for automatic social publishing.')
-  const imageUrl = `data:${job.originalImage.mimeType};base64,${imageBytes.toString('base64')}`
+  if (!config.openRouterApiKey) throw new SocialPermanentError('OpenRouter is not configured for automatic social publishing.')
   const prompt = `You are the automatic publishing safety editor for a Philippine dental clinic.
 Return only valid JSON with these exact keys:
 {"caption":"string","patient_visible":false,"minor_possible":false,"personal_data_visible":false,"clinical_image":false,"unsupported_claims":[],"promotional_rate":false,"safe_to_publish":true,"reasons":[]}
@@ -114,24 +147,23 @@ Allowed contact: ${job.settings.contactPhone || 'none'}. Address: ${job.settings
 Allowed hashtags: ${job.settings.defaultHashtags.join(' ') || 'none'}.
 Required disclaimer: ${job.settings.requiredDisclaimer || 'none'}.
 Never use a patient name or identifier. Never invent treatment, diagnosis, price, duration, testimony, credentials, awards, guarantees, or results. Do not include promotional rates. Inspect the image for people, possible minors, patient records, identifiers, and clinical content. Treat uncertain privacy findings as true.`
-  const response = await fetchFn('https://api.openai.com/v1/responses', {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${config.openAiApiKey}`,
-      'content-type': 'application/json',
+  const analysis = await openRouterJson({
+    config, fetchFn, label: 'OpenRouter caption generation', prompt,
+    mimeType: job.originalImage.mimeType, imageBytes,
+    schema: {
+      type: 'object', additionalProperties: false,
+      properties: {
+        caption: { type: 'string' }, patient_visible: { type: 'boolean' },
+        minor_possible: { type: 'boolean' }, personal_data_visible: { type: 'boolean' },
+        clinical_image: { type: 'boolean' }, unsupported_claims: { type: 'array', items: { type: 'string' } },
+        promotional_rate: { type: 'boolean' }, safe_to_publish: { type: 'boolean' },
+        reasons: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['caption', 'patient_visible', 'minor_possible', 'personal_data_visible', 'clinical_image', 'unsupported_claims', 'promotional_rate', 'safe_to_publish', 'reasons'],
     },
-    body: JSON.stringify({
-      model: config.openAiTextModel,
-      input: [{ role: 'user', content: [
-        { type: 'input_text', text: prompt },
-        { type: 'input_image', image_url: imageUrl },
-      ] }],
-    }),
   })
-  if (!response.ok) throw await openAiError('OpenAI caption generation', response)
-  const analysis = parseJsonOutput(responseText(await response.json()))
   if (typeof analysis.caption !== 'string' || !analysis.caption.trim()) {
-    throw new Error('OpenAI returned no usable Facebook caption.')
+    throw new Error('OpenRouter returned no usable Facebook caption.')
   }
   analysis.caption = analysis.caption.trim()
   if (analysis.caption.length > 5000) throw new SocialBlockedError('The generated caption is too long for this workflow.')
@@ -139,23 +171,17 @@ Never use a patient name or identifier. Never invent treatment, diagnosis, price
 }
 
 async function moderate({ config, fetchFn, caption, mimeType, imageBytes }) {
-  const response = await fetchFn('https://api.openai.com/v1/moderations', {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${config.openAiApiKey}`,
-      'content-type': 'application/json',
+  const result = await openRouterJson({
+    config, fetchFn, label: 'OpenRouter safety review', mimeType, imageBytes,
+    prompt: `Review this proposed dental-clinic Facebook caption and its image. Flag privacy exposure, personal identifiers, deceptive or unsupported medical claims, harmful content, sexual content, harassment, hate, or dangerous content. Caption: ${caption}`,
+    schema: {
+      type: 'object', additionalProperties: false,
+      properties: { flagged: { type: 'boolean' }, reason: { type: 'string' } },
+      required: ['flagged', 'reason'],
     },
-    body: JSON.stringify({
-      model: 'omni-moderation-latest',
-      input: [
-        { type: 'text', text: caption },
-        { type: 'image_url', image_url: { url: `data:${mimeType};base64,${imageBytes.toString('base64')}` } },
-      ],
-    }),
   })
-  if (!response.ok) throw await openAiError('OpenAI moderation', response)
-  if ((await response.json()).results?.some(({ flagged }) => flagged)) {
-    throw new SocialBlockedError('OpenAI safety moderation blocked this image or caption.')
+  if (result.flagged) {
+    throw new SocialBlockedError(result.reason || 'OpenRouter safety review blocked this image or caption.')
   }
 }
 
@@ -165,24 +191,30 @@ async function enhanceImage({ config, fetchFn, job, analysis, imageBytes }) {
     && !clinicalContent.has(job.contentType)
     && job.contentType !== 'clinic_team'
   if (!mayUseGenerativeEdit) return imageBytes
-  const form = new FormData()
-  form.append('model', config.openAiImageModel)
-  form.append('image[]', new Blob([imageBytes], { type: job.originalImage.mimeType }), 'clinic-photo.jpg')
-  form.append('prompt', 'Improve lighting, white balance, framing, and background cleanliness for a professional dental clinic Facebook post. Preserve every real object and all people exactly. Do not add text, logos, teeth, people, treatment results, equipment, awards, or claims. Do not alter anatomy or create a different event.')
-  form.append('size', '1024x1024')
-  form.append('quality', 'medium')
-  form.append('output_format', 'jpeg')
-  form.append('output_compression', '82')
-  const response = await fetchFn('https://api.openai.com/v1/images/edits', {
+  const response = await fetchFn('https://openrouter.ai/api/v1/images', {
     method: 'POST',
-    headers: { authorization: `Bearer ${config.openAiApiKey}` },
-    body: form,
+    headers: {
+      authorization: `Bearer ${config.openRouterApiKey}`,
+      'content-type': 'application/json',
+      'http-referer': config.publicOrigin,
+      'x-openrouter-title': 'SmileCare Dental Clinic',
+    },
+    body: JSON.stringify({
+      model: config.openRouterImageModel,
+      prompt: 'Improve lighting, white balance, framing, and background cleanliness for a professional dental clinic Facebook post. Preserve every real object and all people exactly. Do not add text, logos, teeth, people, treatment results, equipment, awards, or claims. Do not alter anatomy or create a different event.',
+      input_references: [{
+        type: 'image_url',
+        image_url: { url: `data:${job.originalImage.mimeType};base64,${imageBytes.toString('base64')}` },
+      }],
+      provider: privateOpenRouterProvider,
+    }),
   })
-  if (!response.ok) throw await openAiError('OpenAI image enhancement', response)
-  const encoded = (await response.json()).data?.[0]?.b64_json
-  if (!encoded) throw new Error('OpenAI returned no enhanced image.')
+  if (!response.ok) throw await openRouterError('OpenRouter image enhancement', response)
+  const payload = await response.json()
+  const encoded = payload?.data?.[0]?.b64_json
+  if (!encoded) throw new Error('OpenRouter returned no enhanced image.')
   const edited = Buffer.from(encoded, 'base64')
-  if (!edited.length || edited.length > 12 * 1024 * 1024) throw new Error('OpenAI returned an invalid enhanced image.')
+  if (!edited.length || edited.length > 12 * 1024 * 1024) throw new Error('OpenRouter returned an invalid enhanced image.')
   return edited
 }
 
@@ -308,7 +340,7 @@ export function createSocialPublisher({ config, store, storage, fetchFn = global
   }
 
   return {
-    configured: Boolean(storage && config.openAiApiKey && config.socialTokenEncryptionKey),
+    configured: Boolean(storage && config.openRouterApiKey && config.socialTokenEncryptionKey),
     verifyPage,
     wake: () => setImmediate(run),
     start() {

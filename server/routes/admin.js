@@ -198,7 +198,7 @@ export default async function adminRoutes(app, {
     logoDriveFileId: undefined,
     logoMimeType: undefined,
     integrationConfigured: Boolean(socialPublisher?.configured),
-    aiConfigured: Boolean(config.openAiApiKey),
+    aiConfigured: Boolean(config.openRouterApiKey),
     tokenEncryptionConfigured: Boolean(config.socialTokenEncryptionKey),
     storageConfigured: Boolean(socialStorage),
   })

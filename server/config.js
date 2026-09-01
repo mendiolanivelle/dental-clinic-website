@@ -35,9 +35,9 @@ export function loadConfig(env = process.env) {
   )
   const googleDrivePrescriptionsFolderId = env.GOOGLE_DRIVE_PRESCRIPTIONS_FOLDER_ID?.trim()
   const googleDriveCredentialsBase64 = env.GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64?.trim()
-  const openAiApiKey = env.OPENAI_API_KEY?.trim()
-  const openAiTextModel = env.OPENAI_TEXT_MODEL?.trim() || 'gpt-5-mini'
-  const openAiImageModel = env.OPENAI_IMAGE_MODEL?.trim() || 'gpt-image-2'
+  const openRouterApiKey = env.OPENROUTER_API_KEY?.trim()
+  const openRouterTextModel = env.OPENROUTER_TEXT_MODEL?.trim() || 'google/gemini-3.1-flash-lite'
+  const openRouterImageModel = env.OPENROUTER_IMAGE_MODEL?.trim() || 'google/gemini-3.1-flash-image'
   const metaGraphVersion = env.META_GRAPH_VERSION?.trim() || 'v25.0'
   const socialTokenEncryptionKeyBase64 = env.SOCIAL_TOKEN_ENCRYPTION_KEY?.trim()
   let googleDriveCredentials
@@ -182,9 +182,9 @@ export function loadConfig(env = process.env) {
     supabasePublishableKey,
     googleDrivePrescriptionsFolderId,
     googleDriveCredentials,
-    openAiApiKey,
-    openAiTextModel,
-    openAiImageModel,
+    openRouterApiKey,
+    openRouterTextModel,
+    openRouterImageModel,
     metaGraphVersion,
     socialTokenEncryptionKey,
   })

@@ -150,9 +150,9 @@ processing consent. Clinical and patient images do not receive generative edits.
 Add these server-only Coolify variables before enabling the feature:
 
 ```text
-OPENAI_API_KEY=<server-only OpenAI project key>
-OPENAI_TEXT_MODEL=gpt-5-mini
-OPENAI_IMAGE_MODEL=gpt-image-2
+OPENROUTER_API_KEY=<server-only OpenRouter key>
+OPENROUTER_TEXT_MODEL=google/gemini-3.1-flash-lite
+OPENROUTER_IMAGE_MODEL=google/gemini-3.1-flash-image
 SOCIAL_TOKEN_ENCRYPTION_KEY=<output of: openssl rand -base64 32>
 META_GRAPH_VERSION=v25.0
 ```
@@ -161,7 +161,7 @@ The existing private Google Drive service account and folder are reused for
 original, branded, and logo images. The Facebook Page connection expects a Page
 ID and Page access token with permission to publish Page posts. Facebook
 passwords must never be entered or stored. Test with a non-production Page and
-keep automatic publishing disabled until OpenAI, Drive, branding, consent policy,
+keep automatic publishing disabled until OpenRouter, Drive, branding, consent policy,
 and Page permissions have all been verified.
 
 ## Supabase and Coolify deployment

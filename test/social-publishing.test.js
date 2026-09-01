@@ -70,7 +70,7 @@ test('social photos are normalized below 2 MB and the worker publishes only once
     async claimNextSocialPost() { if (claimed) return null; claimed = true; return 'post-1' },
     async getSocialPostForProcessing() {
       return {
-        id: 'post-1', contentType: 'clinic_team', description: 'Welcome our clinic team.',
+        id: 'post-1', contentType: 'educational', description: 'Welcome our clinic team.',
         patientId: null, patientName: null, settings,
         originalImage: { driveFileId: 'original', mimeType: 'image/jpeg' },
         connection: {
@@ -91,23 +91,33 @@ test('social photos are normalized below 2 MB and the worker publishes only once
     async download(id) { return files.get(id) },
     async upload({ bytes }) { files.set('final', bytes); return 'final' },
   }
-  const fetchFn = async (url) => {
-    if (url === 'https://api.openai.com/v1/responses') {
-      return Response.json({ output: [{ content: [{ type: 'output_text', text: JSON.stringify({
+  const fetchFn = async (url, options) => {
+    if (url === 'https://openrouter.ai/api/v1/chat/completions') {
+      const request = JSON.parse(options?.body || '{}')
+      assert.deepEqual(request.provider.only, ['google-vertex'])
+      assert.equal(request.provider.zdr, true)
+      const prompt = request.messages?.[0]?.content?.[0]?.text || ''
+      const result = prompt.startsWith('Review this proposed') ? { flagged: false, reason: '' } : {
         caption: 'Meet the SmileCare team. Book an appointment. #SmileCare',
         patient_visible: false, minor_possible: false, personal_data_visible: false,
         clinical_image: false, unsupported_claims: [], promotional_rate: false,
         safe_to_publish: true, reasons: [],
-      }) }] }] })
+      }
+      return Response.json({ choices: [{ message: { content: JSON.stringify(result) } }] })
     }
-    if (url === 'https://api.openai.com/v1/moderations') return Response.json({ results: [{ flagged: false }] })
+    if (url === 'https://openrouter.ai/api/v1/images') {
+      const request = JSON.parse(options?.body || '{}')
+      assert.deepEqual(request.provider.only, ['google-vertex'])
+      assert.equal(request.provider.zdr, true)
+      return Response.json({ data: [{ b64_json: normalized.toString('base64') }] })
+    }
     if (url.endsWith('/12345/photos')) { metaCalls += 1; return Response.json({ post_id: '12345_67890' }) }
     throw new Error(`Unexpected request: ${url}`)
   }
   const publisher = createSocialPublisher({
     config: {
-      openAiApiKey: 'test-openai-key', openAiTextModel: 'test-text-model',
-      openAiImageModel: 'test-image-model', socialTokenEncryptionKey: key,
+      openRouterApiKey: 'test-openrouter-key', openRouterTextModel: 'test-text-model',
+      openRouterImageModel: 'test-image-model', publicOrigin: 'https://example.com', socialTokenEncryptionKey: key,
       metaGraphVersion: 'v25.0',
     },
     store, storage, fetchFn, now: () => new Date('2026-08-28T03:00:00.000Z'),
