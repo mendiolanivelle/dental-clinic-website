@@ -23,7 +23,7 @@ export default function DentistDashboardPage() {
     <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
       <div>
         <p className="text-xs font-extrabold uppercase tracking-[.18em] text-brand/60">Dentist overview</p>
-        <h1 className="mt-2 text-3xl font-extrabold tracking-tight">Good day, {staff.displayName.split(' ')[0]}</h1>
+        <h1 className="mt-2 text-3xl font-extrabold tracking-tight">Good day, {staff.displayName}</h1>
         <p className="mt-2 text-sm text-ink/50">Review your patients and open their clinical workspace.</p>
       </div>
       <Link className="inline-flex items-center justify-center gap-2 rounded-2xl bg-brand px-5 py-3 text-sm font-extrabold text-white" to="/dentist/patients">

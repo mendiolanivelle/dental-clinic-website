@@ -821,7 +821,16 @@ export function createStore(db) {
       const result = await db.query(
         `SELECT email, auth_user_id, password_salt, password_hash
          FROM staff_profiles
-         WHERE normalized_name = $1 AND active = true
+         WHERE active = true
+           AND (
+             normalized_name = $1
+             OR (
+               role = 'dentist'
+               AND regexp_replace(normalized_name, '^dr\.?\s+', '', 'i')
+                 = regexp_replace($1, '^dr\.?\s+', '', 'i')
+             )
+           )
+         ORDER BY (normalized_name = $1) DESC
          LIMIT 1`,
         [normalizedName],
       )

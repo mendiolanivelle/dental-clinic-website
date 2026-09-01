@@ -107,7 +107,10 @@ export default async function adminRoutes(app, {
   })
 
   const createAccount = (role) => async (request, reply) => {
-    const displayName = request.body.displayName.trim().replace(/\s+/gu, ' ')
+    const enteredName = request.body.displayName.trim().replace(/\s+/gu, ' ')
+    const displayName = role === 'dentist'
+      ? `Dr. ${enteredName.replace(/^dr\.?\s+/iu, '')}`
+      : enteredName
     const normalizedName = normalizeName(displayName)
     if (!normalizedName) {
       return reply.code(400).send({ error: { code: 'INVALID_REQUEST', message: 'Check the name and password.' } })

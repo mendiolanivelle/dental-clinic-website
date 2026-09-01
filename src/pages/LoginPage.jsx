@@ -222,7 +222,7 @@ export default function LoginPage({ onAuthenticated, onStaffAuthenticated }) {
                 type="text"
                 autoComplete="username"
                 autoCapitalize="words"
-                placeholder="First Middle Last"
+                placeholder="Dr. Nivelle Mendiola or staff full name"
                 value={staffName}
                 onChange={(event) => setStaffName(event.target.value)}
                 disabled={submitting}

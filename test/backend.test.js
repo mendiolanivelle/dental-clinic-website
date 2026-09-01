@@ -210,7 +210,13 @@ class MemoryStore {
   }
 
   async findActiveStaffLogin(normalizedName) {
-    return this.staff.active && normalizedName === normalizeName(this.staff.displayName)
+    const storedName = normalizeName(this.staff.displayName)
+    const enteredDoctorName = normalizedName.replace(/^dr\.?\s+/u, '')
+    const storedDoctorName = storedName.replace(/^dr\.?\s+/u, '')
+    return this.staff.active && (
+      normalizedName === storedName ||
+      (this.staff.role === 'dentist' && enteredDoctorName === storedDoctorName)
+    )
       ? {
           email: this.staff.email,
           authUserId: this.staff.authUserId,
@@ -1468,10 +1474,11 @@ test('dentist staff can restore their staff session but cannot use reception end
       method: 'POST',
       url: '/api/staff/auth/login',
       headers: { origin: config.publicOrigin },
-      payload: { fullName: dentistStore.staff.displayName, password: 'correct-password' },
+      payload: { fullName: 'Andrea Sample', password: 'correct-password' },
     })
     assert.equal(loggedIn.statusCode, 200)
     assert.equal(loggedIn.json().staff.role, 'dentist')
+    assert.equal(loggedIn.json().staff.displayName, 'Dr. Andrea Sample')
     const cookie = loggedIn.headers['set-cookie'].split(';')[0]
 
     const me = await dentistApp.inject({ url: '/api/staff/me', headers: { cookie } })
@@ -1704,6 +1711,14 @@ test('super admins alone can view aggregate analytics and provision staff withou
     assert.equal(created.statusCode, 201)
     assert.equal(created.json().staff.role, 'receptionist')
     assert.equal('email' in created.json().staff, false)
+
+    const dentist = await adminApp.inject({
+      method: 'POST', url: '/api/admin/team/dentists',
+      headers: { origin: config.publicOrigin, cookie },
+      payload: { displayName: 'New Dentist', specialty: 'General dentistry', password: '12345678' },
+    })
+    assert.equal(dentist.statusCode, 201)
+    assert.equal(dentist.json().staff.displayName, 'Dr. New Dentist')
 
     const audit = await adminApp.inject({ url: '/api/admin/audit', headers: { cookie } })
     assert.equal(audit.statusCode, 200)
