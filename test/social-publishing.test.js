@@ -126,7 +126,7 @@ test('social photos are normalized below 2 MB and the worker publishes only once
       const request = JSON.parse(options?.body || '{}')
       assert.deepEqual(request.provider.only, ['google-vertex'])
       assert.equal(request.provider.zdr, true)
-      return Response.json({ data: [{ b64_json: normalized.toString('base64') }] })
+      return Response.json({ error: { message: 'Gemini could not generate an image (STOP)' } }, { status: 502 })
     }
     if (url.endsWith('/12345/photos')) { metaCalls += 1; return Response.json({ post_id: '12345_67890' }) }
     throw new Error(`Unexpected request: ${url}`)

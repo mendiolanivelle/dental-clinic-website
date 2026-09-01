@@ -191,31 +191,32 @@ async function enhanceImage({ config, fetchFn, job, analysis, imageBytes }) {
     && !clinicalContent.has(job.contentType)
     && job.contentType !== 'clinic_team'
   if (!mayUseGenerativeEdit) return imageBytes
-  const response = await fetchFn('https://openrouter.ai/api/v1/images', {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${config.openRouterApiKey}`,
-      'content-type': 'application/json',
-      'http-referer': config.publicOrigin,
-      'x-openrouter-title': 'SmileCare Dental Clinic',
-    },
-    body: JSON.stringify({
-      model: config.openRouterImageModel,
-      prompt: 'Improve lighting, white balance, framing, and background cleanliness for a professional dental clinic Facebook post. Preserve every real object and all people exactly. Do not add text, logos, teeth, people, treatment results, equipment, awards, or claims. Do not alter anatomy or create a different event.',
-      input_references: [{
-        type: 'image_url',
-        image_url: { url: `data:${job.originalImage.mimeType};base64,${imageBytes.toString('base64')}` },
-      }],
-      provider: privateOpenRouterProvider,
-    }),
-  })
-  if (!response.ok) throw await openRouterError('OpenRouter image enhancement', response)
-  const payload = await response.json()
-  const encoded = payload?.data?.[0]?.b64_json
-  if (!encoded) throw new Error('OpenRouter returned no enhanced image.')
-  const edited = Buffer.from(encoded, 'base64')
-  if (!edited.length || edited.length > 12 * 1024 * 1024) throw new Error('OpenRouter returned an invalid enhanced image.')
-  return edited
+  try {
+    const response = await fetchFn('https://openrouter.ai/api/v1/images', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${config.openRouterApiKey}`,
+        'content-type': 'application/json',
+        'http-referer': config.publicOrigin,
+        'x-openrouter-title': 'SmileCare Dental Clinic',
+      },
+      body: JSON.stringify({
+        model: config.openRouterImageModel,
+        prompt: 'Improve lighting, white balance, framing, and background cleanliness for a professional dental clinic Facebook post. Preserve every real object and all people exactly. Do not add text, logos, teeth, people, treatment results, equipment, awards, or claims. Do not alter anatomy or create a different event.',
+        input_references: [{
+          type: 'image_url',
+          image_url: { url: `data:${job.originalImage.mimeType};base64,${imageBytes.toString('base64')}` },
+        }],
+        provider: privateOpenRouterProvider,
+      }),
+    })
+    if (!response.ok) throw await openRouterError('OpenRouter image enhancement', response)
+    const encoded = (await response.json())?.data?.[0]?.b64_json
+    const edited = encoded ? Buffer.from(encoded, 'base64') : null
+    return edited?.length && edited.length <= 12 * 1024 * 1024 ? edited : imageBytes
+  } catch {
+    return imageBytes
+  }
 }
 
 async function applyBranding({ storage, settings, imageBytes }) {
