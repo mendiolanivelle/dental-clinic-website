@@ -1431,8 +1431,6 @@ export function createStore(db) {
     async canPublishSocialPost(now) {
       const result = await db.query(
         `SELECT s.automatic_publishing_enabled, s.daily_post_limit, s.weekly_post_limit,
-                s.posting_start_hour, s.posting_end_hour,
-                extract(hour FROM $1 AT TIME ZONE 'Asia/Manila')::integer AS current_hour,
                 count(p.id) FILTER (
                   WHERE p.published_at >= date_trunc('day', $1 AT TIME ZONE 'Asia/Manila') AT TIME ZONE 'Asia/Manila'
                 ) AS daily_count,
@@ -1447,16 +1445,6 @@ export function createStore(db) {
       )
       const row = result.rows[0]
       if (!row.automatic_publishing_enabled) return { allowed: false, reason: 'Automatic publishing is disabled by the super admin.' }
-      const insideHours = row.posting_start_hour < row.posting_end_hour
-        ? row.current_hour >= row.posting_start_hour && row.current_hour < row.posting_end_hour
-        : row.current_hour >= row.posting_start_hour || row.current_hour < row.posting_end_hour
-      if (!insideHours) {
-        const waitHours = (row.posting_start_hour - row.current_hour + 24) % 24 || 24
-        const retryAt = new Date(now)
-        retryAt.setUTCMinutes(0, 0, 0)
-        retryAt.setUTCHours(retryAt.getUTCHours() + waitHours)
-        return { allowed: false, reason: 'Waiting for the clinic’s allowed Facebook publishing hours.', retryAt }
-      }
       if (Number(row.daily_count) >= row.daily_post_limit) return { allowed: false, reason: 'The daily Facebook post limit has been reached.' }
       if (Number(row.weekly_count) >= row.weekly_post_limit) return { allowed: false, reason: 'The weekly Facebook post limit has been reached.' }
       return { allowed: true }

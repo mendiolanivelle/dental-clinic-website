@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import sharp from 'sharp'
+import { createStore } from '../server/store.js'
 import {
   assertSocialPostPublishable,
   createSocialPublisher,
@@ -33,6 +34,22 @@ const settings = {
   hasLogo: false,
   logoDriveFileId: null,
 }
+
+test('social publishing has no hourly window', async () => {
+  const store = createStore({
+    async query(sql) {
+      assert.doesNotMatch(sql, /posting_(?:start|end)_hour|current_hour/u)
+      return { rows: [{
+        automatic_publishing_enabled: true,
+        daily_post_limit: 3,
+        weekly_post_limit: 12,
+        daily_count: '0',
+        weekly_count: '0',
+      }] }
+    },
+  })
+  assert.deepEqual(await store.canPublishSocialPost(new Date('2026-09-02T00:30:00+08:00')), { allowed: true })
+})
 
 test('social tokens are encrypted and patient posts fail closed without specific consent', () => {
   const key = Buffer.alloc(32, 4)
