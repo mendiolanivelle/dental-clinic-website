@@ -127,6 +127,10 @@ test('the backend role stays least-privilege and the forward migration removes O
     new URL('../migrations/022_social_publishing.sql', import.meta.url),
     'utf8',
   )
+  const adminAuditReadSql = await readFile(
+    new URL('../migrations/023_admin_audit_read.sql', import.meta.url),
+    'utf8',
+  )
   const compact = securitySql.replace(/\s+/g, ' ')
 
   assert.doesNotMatch(securitySql, /\bDELETE\b/)
@@ -225,6 +229,8 @@ test('the backend role stays least-privilege and the forward migration removes O
   assert.match(socialPublishingSql, /ENABLE ROW LEVEL SECURITY/i)
   assert.doesNotMatch(socialPublishingSql, /\bDELETE\b/i)
   assert.doesNotMatch(socialPublishingSql, /GRANT[^;]*\b(?:anon|authenticated|service_role)\b/i)
+  assert.match(adminAuditReadSql, /GRANT SELECT ON dental_portal\.audit_events TO dental_portal_backend/i)
+  assert.doesNotMatch(adminAuditReadSql, /\b(?:INSERT|UPDATE|DELETE|anon|authenticated|service_role)\b/i)
   assert.match(storeSql, /a\.dentist_done_at IS NOT NULL/i)
   assert.match(storeSql, /coalesce\(a\.dentist_done_at, CASE WHEN a\.status = 'completed' THEN a\.starts_at END\)/i)
   assert.match(storeSql, /WHERE c\.created_at >= \(\$1::date AT TIME ZONE 'Asia\/Manila'\)/i)
