@@ -190,8 +190,9 @@ async function enhanceImage({ config, fetchFn, storage, job, analysis, imageByte
     && !clinicalContent.has(job.contentType)
     && job.contentType !== 'clinic_team'
   if (!mayUseGenerativeEdit) return imageBytes
+  const templates = (job.settings.templates || []).slice(0, 5)
   try {
-    const templateReferences = await Promise.all((job.settings.templates || []).slice(0, 5).map(async (template) => ({
+    const templateReferences = await Promise.all(templates.map(async (template) => ({
       type: 'image_url',
       image_url: { url: `data:${template.mimeType};base64,${(await storage.download(template.driveFileId, MAX_IMAGE_BYTES)).toString('base64')}` },
     })))
@@ -205,19 +206,20 @@ async function enhanceImage({ config, fetchFn, storage, job, analysis, imageByte
       },
       body: JSON.stringify({
         model: config.openRouterImageModel,
-        prompt: 'The first image is the source post photo. Improve its lighting, white balance, framing, and background cleanliness. Any remaining images are clinic style and layout references only: follow their visual feel without copying people, private data, or readable text. Preserve every real object and all people in the source exactly. Do not add text, logos, teeth, people, treatment results, equipment, awards, or claims. Do not alter anatomy or create a different event.',
+        prompt: 'The first image is the source post photo. Every remaining image is a clinic posting-template reference. The result must visibly adopt the templates’ composition, color treatment, spacing, framing, and graphic structure while keeping the real subject and clinical facts from the source. You may crop, reposition, and clean background clutter. Do not copy people, private data, or readable text from a template. Do not invent anatomy, treatment results, equipment, awards, or medical claims.',
         input_references: [{
           type: 'image_url',
           image_url: { url: `data:${job.originalImage.mimeType};base64,${imageBytes.toString('base64')}` },
         }, ...templateReferences],
-        provider: privateOpenRouterProvider,
+        provider: { ...privateOpenRouterProvider, only: ['google-vertex/global'] },
       }),
     })
     if (!response.ok) throw await openRouterError('OpenRouter image enhancement', response)
     const encoded = (await response.json())?.data?.[0]?.b64_json
     const edited = encoded ? Buffer.from(encoded, 'base64') : null
     return edited?.length && edited.length <= 12 * 1024 * 1024 ? edited : imageBytes
-  } catch {
+  } catch (error) {
+    if (templates.length) throw error
     return imageBytes
   }
 }

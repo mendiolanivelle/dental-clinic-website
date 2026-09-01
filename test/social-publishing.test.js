@@ -163,10 +163,10 @@ test('social photos are normalized below 2 MB and the worker publishes only once
     }
     if (url === 'https://openrouter.ai/api/v1/images') {
       const request = JSON.parse(options?.body || '{}')
-      assert.deepEqual(request.provider.only, ['google-vertex'])
+      assert.deepEqual(request.provider.only, ['google-vertex/global'])
       assert.equal(request.provider.zdr, true)
       assert.equal(request.input_references.length, 2)
-      return Response.json({ error: { message: 'Gemini could not generate an image (STOP)' } }, { status: 502 })
+      return Response.json({ data: [{ b64_json: normalized.toString('base64') }] })
     }
     if (url.endsWith('/12345/photos')) { metaCalls += 1; return Response.json({ post_id: '12345_67890' }) }
     throw new Error(`Unexpected request: ${url}`)
