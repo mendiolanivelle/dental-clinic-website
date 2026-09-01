@@ -131,7 +131,6 @@ export const assertSocialPostPublishable = (job, analysis, caption) => {
   if (job.patientName && caption.toLocaleLowerCase().includes(job.patientName.toLocaleLowerCase())) {
     throw new SocialBlockedError('The generated caption contains the patient’s name.')
   }
-  if (analysis.safe_to_publish === false) throw new SocialBlockedError(analysis.reasons?.[0] || 'Automatic validation did not approve this post.')
 }
 
 async function analyzeAndWrite({ config, fetchFn, job, imageBytes }) {
@@ -146,7 +145,7 @@ Allowed call to action: ${job.settings.defaultCallToAction || 'none'}.
 Allowed contact: ${job.settings.contactPhone || 'none'}. Address: ${job.settings.address || 'none'}.
 Allowed hashtags: ${job.settings.defaultHashtags.join(' ') || 'none'}.
 Required disclaimer: ${job.settings.requiredDisclaimer || 'none'}.
-Never use a patient name or identifier. Never invent treatment, diagnosis, price, duration, testimony, credentials, awards, guarantees, or results. Do not include promotional rates. Inspect the image for people, possible minors, patient records, identifiers, and clinical content. Treat uncertain privacy findings as true.`
+Never use a patient name or identifier. Never invent treatment, diagnosis, price, duration, testimony, credentials, awards, guarantees, or results. Do not include promotional rates. Inspect the image for people, possible minors, patient records, identifiers, and clinical content. Mark personal_data_visible true only when personal information is clearly readable; blurred, unreadable, or generic paperwork and screens are not privacy exposure.`
   const analysis = await openRouterJson({
     config, fetchFn, label: 'OpenRouter caption generation', prompt,
     mimeType: job.originalImage.mimeType, imageBytes,
@@ -173,7 +172,7 @@ Never use a patient name or identifier. Never invent treatment, diagnosis, price
 async function moderate({ config, fetchFn, caption, mimeType, imageBytes }) {
   const result = await openRouterJson({
     config, fetchFn, label: 'OpenRouter safety review', mimeType, imageBytes,
-    prompt: `Review this proposed dental-clinic Facebook caption and its image. Flag privacy exposure, personal identifiers, deceptive or unsupported medical claims, harmful content, sexual content, harassment, hate, or dangerous content. Caption: ${caption}`,
+    prompt: `Review this proposed dental-clinic Facebook caption and its image. Flag clearly readable private or personal identifiers, deceptive or unsupported medical claims, harmful content, sexual content, harassment, hate, or dangerous content. Do not flag blurred, unreadable, or generic paperwork and screens. Caption: ${caption}`,
     schema: {
       type: 'object', additionalProperties: false,
       properties: { flagged: { type: 'boolean' }, reason: { type: 'string' } },

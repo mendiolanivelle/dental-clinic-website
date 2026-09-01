@@ -90,6 +90,21 @@ test('social tokens are encrypted and patient posts fail closed without specific
   ), SocialBlockedError)
 })
 
+test('speculative AI concerns do not block an otherwise safe photo', () => {
+  assert.doesNotThrow(() => assertSocialPostPublishable(
+    {
+      contentType: 'facility_equipment', patientId: null, patientName: null,
+      settings, connection: { status: 'connected', encryptedAccessToken: 'encrypted' }, consent: null,
+    },
+    {
+      patient_visible: false, minor_possible: false, personal_data_visible: false,
+      unsupported_claims: [], promotional_rate: false, safe_to_publish: false,
+      reasons: ['A blurry background screen might contain information.'],
+    },
+    'A look at our clinic equipment.',
+  ))
+})
+
 test('social photos are normalized below 2 MB and the worker publishes only once', async () => {
   const original = await sharp({
     create: { width: 2200, height: 1600, channels: 3, background: '#cfe9e4' },
