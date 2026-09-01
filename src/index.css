@@ -76,6 +76,4 @@ button:not(:disabled), a { cursor: pointer; }
 
 @media print {
   .admin-chrome { display: none !important; }
-  .meeting-view { color: #173c3a; }
-  .meeting-view article, .meeting-view section { break-inside: avoid; box-shadow: none; }
 }

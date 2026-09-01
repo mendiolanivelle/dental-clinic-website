@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
-import { BarChart3, BriefcaseBusiness, CalendarRange, LayoutDashboard, LogOut, Megaphone, Menu, Presentation, ShieldCheck, Stethoscope, UserCog, X } from 'lucide-react'
+import { BarChart3, BriefcaseBusiness, CalendarRange, LayoutDashboard, LogOut, Megaphone, Menu, ShieldCheck, Stethoscope, UserCog, X } from 'lucide-react'
 import BrandLogo from './BrandLogo'
 
 const navigation = [
@@ -11,7 +11,6 @@ const navigation = [
   { label: 'Dentists', to: '/admin/doctors', icon: Stethoscope },
   { label: 'Team accounts', to: '/admin/team', icon: UserCog },
   { label: 'Facebook publishing', to: '/admin/social', icon: Megaphone },
-  { label: 'Meeting view', to: '/admin/meeting', icon: Presentation },
   { label: 'Audit log', to: '/admin/audit', icon: ShieldCheck },
 ]
 

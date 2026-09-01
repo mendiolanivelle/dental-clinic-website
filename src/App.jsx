@@ -189,7 +189,6 @@ export default function App() {
         <Route path="comparisons" element={<AdminAnalyticsPage mode="comparisons" />} />
         <Route path="doctors" element={<AdminAnalyticsPage mode="doctors" />} />
         <Route path="team" element={<AdminTeamPage />} />
-        <Route path="meeting" element={<AdminAnalyticsPage mode="meeting" />} />
         <Route path="audit" element={<AdminAuditPage />} />
         <Route path="social" element={<AdminSocialPage />} />
       </Route>

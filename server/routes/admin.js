@@ -93,7 +93,6 @@ export default async function adminRoutes(app, {
     ['services', 'admin.services_viewed'],
     ['comparisons', 'admin.comparisons_viewed'],
     ['doctors', 'admin.doctors_viewed'],
-    ['meeting', 'admin.meeting_viewed'],
   ]) {
     app.get(`/api/admin/${path}`, {
       preHandler: requireAdmin,

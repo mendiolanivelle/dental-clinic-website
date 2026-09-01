@@ -120,7 +120,14 @@ export default async function authRoutes(
 
   app.post('/api/auth/logout', async (request, reply) => {
     const token = request.cookies[SESSION_COOKIE]
-    if (token) await store.revokeSession(sha256(token), now())
+    const currentTime = now()
+    const patient = token ? await store.revokeSession(sha256(token), currentTime) : null
+    if (patient) {
+      await store.addAudit({
+        actorType: 'patient', actorId: patient.id, action: 'portal.logout', occurredAt: currentTime,
+        ...auditMeta(request, config),
+      })
+    }
     reply.clearCookie(SESSION_COOKIE, sessionCookieOptions)
     return reply.code(204).send()
   })

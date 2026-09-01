@@ -183,7 +183,17 @@ export default async function staffRoutes(
 
   app.post('/api/staff/auth/logout', async (request, reply) => {
     const token = request.cookies[STAFF_SESSION_COOKIE]
-    if (token) await store.revokeStaffSession(sha256(token), now())
+    const currentTime = now()
+    const staff = token ? await store.revokeStaffSession(sha256(token), currentTime) : null
+    if (staff) {
+      await store.addAudit({
+        actorType: 'staff', actorId: staff.id,
+        action: staff.role === 'super_admin' ? 'admin.logout' : 'staff.logout',
+        occurredAt: currentTime, requestId: request.id,
+        ipDigest: ipDigest(config.sessionPepper, request.ip),
+        userAgent: request.headers['user-agent'],
+      })
+    }
     reply.clearCookie(STAFF_SESSION_COOKIE, sessionCookieOptions)
     return reply.code(204).send()
   })

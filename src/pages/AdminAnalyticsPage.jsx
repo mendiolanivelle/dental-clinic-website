@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowDownRight, ArrowUpRight, CalendarCheck2, Maximize2, Minus, ReceiptText, TrendingUp, UsersRound } from 'lucide-react'
+import { ArrowDownRight, ArrowUpRight, CalendarCheck2, Minus } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../api'
 import { ErrorState, LoadingState } from '../components/PageState'
@@ -11,7 +11,6 @@ const modes = {
   services: ['Service analytics', 'Understand completed-service demand and billed value.'],
   comparisons: ['Performance comparisons', 'Compare equal reporting periods without misleading partial-period totals.'],
   doctors: ['Doctor activity', 'Review workload and business activity without scoring clinical quality.'],
-  meeting: ['Clinic performance meeting', 'A privacy-safe view with no patient identifiers or clinical information.'],
 }
 
 const moneyKeys = new Set(['grossBilledCents', 'discountsCents', 'netBilledCents', 'cashCollectedCents', 'outstandingCents', 'averageBilledCents'])
@@ -98,22 +97,18 @@ export default function AdminAnalyticsPage({ mode }) {
   if (state.loading && !state.data) return <LoadingState label="Preparing clinic analytics…" />
   if (state.error) return <ErrorState error={state.error} onRetry={load} />
   const data = state.data
-  const meeting = mode === 'meeting'
-
-  return <div className={meeting ? 'meeting-view' : ''}>
-    <div className="mb-7 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-xs font-extrabold uppercase tracking-[.18em] text-brand/60">{meeting ? 'Privacy-safe presentation' : 'Super admin'}</p><h1 className="mt-2 text-3xl font-extrabold tracking-tight">{title}</h1><p className="mt-2 text-sm text-ink/50">{description}</p></div>{meeting && <button className="admin-chrome inline-flex items-center justify-center gap-2 rounded-xl bg-brand px-4 py-2.5 text-sm font-extrabold text-white" onClick={() => document.documentElement.requestFullscreen?.()}><Maximize2 size={16} /> Fullscreen</button>}</div>
+  return <div>
+    <div className="mb-7 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-xs font-extrabold uppercase tracking-[.18em] text-brand/60">Super admin</p><h1 className="mt-2 text-3xl font-extrabold tracking-tight">{title}</h1><p className="mt-2 text-sm text-ink/50">{description}</p></div></div>
     <Filters searchParams={searchParams} setSearchParams={setSearchParams} doctors={data.doctors} services={data.services} />
     <div className="mb-5 flex flex-wrap items-center gap-3 rounded-2xl bg-mint/60 px-4 py-3 text-xs font-bold text-brand"><CalendarCheck2 size={16} /> {formatDate(data.period.from)} – {formatDate(data.period.to)}{data.period.inProgress ? ' · Period in progress' : ''}<span className="ml-auto text-ink/40">Updated {new Date(data.period.refreshedAt).toLocaleTimeString('en-PH', { timeZone: 'Asia/Manila', hour: 'numeric', minute: '2-digit' })}</span></div>
-    {meeting && <p className="mb-5 rounded-2xl bg-white p-4 text-xs font-bold text-ink/50 soft-shadow">This meeting view contains aggregate clinic information only. Patient identities and clinical records are excluded.</p>}
     <KpiGrid data={data} keys={keySets} />
     {mode === 'overview' && <section className="mt-7 grid gap-3 sm:grid-cols-3" aria-label="Items needing attention"><div className="rounded-2xl bg-[#fff4e9] p-4 text-sm"><strong className="text-[#985922]">Outstanding balance</strong><p className="mt-1 text-ink/55">Review {formatCurrency(data.metrics.outstandingCents)} in open balances.</p></div><div className="rounded-2xl bg-white p-4 text-sm soft-shadow"><strong>Comparison readiness</strong><p className="mt-1 text-ink/55">{data.comparisonAvailable ? 'Comparable history is available.' : 'Not enough history for this comparison yet.'}</p></div><div className="rounded-2xl bg-mint p-4 text-sm"><strong className="text-brand">Upcoming workload</strong><p className="mt-1 text-ink/55">{data.metrics.scheduledFutureVisits} future visits are scheduled.</p></div></section>}
     {mode !== 'services' && mode !== 'doctors' && <Trend data={data} />}
     {mode === 'sales' && <div className="mt-7 grid gap-5 lg:grid-cols-2"><section className="rounded-3xl bg-white p-5 soft-shadow"><h2 className="text-xl font-extrabold">Payment methods</h2><div className="mt-4 space-y-3">{data.paymentMethods.map((item) => <div className="flex justify-between text-sm" key={item.method}><span className="font-bold text-ink/55">{titleCase(item.method)}</span><strong>{formatCurrency(item.amountCents)}</strong></div>)}</div></section><section className="rounded-3xl bg-white p-5 soft-shadow"><h2 className="text-xl font-extrabold">Outstanding aging</h2><div className="mt-4 grid grid-cols-2 gap-3">{Object.entries(data.aging).map(([key, value]) => <div className="rounded-2xl bg-cream p-3" key={key}><p className="text-xs font-bold text-ink/45">{titleCase(key.replace('Cents', ''))}</p><p className="mt-1 font-extrabold">{formatCurrency(value)}</p></div>)}</div></section></div>}
-    <div className={`mt-7 grid gap-7 ${mode === 'overview' || meeting ? 'xl:grid-cols-2' : ''}`}>
-      {(mode === 'overview' || mode === 'services' || meeting) && <Services services={data.services} />}
-      {(mode === 'overview' || mode === 'doctors' || meeting) && <Doctors doctors={data.doctors} />}
+    <div className={`mt-7 grid gap-7 ${mode === 'overview' ? 'xl:grid-cols-2' : ''}`}>
+      {(mode === 'overview' || mode === 'services') && <Services services={data.services} />}
+      {(mode === 'overview' || mode === 'doctors') && <Doctors doctors={data.doctors} />}
     </div>
     {mode === 'comparisons' && <section className="mt-7 overflow-hidden rounded-3xl bg-white soft-shadow"><div className="p-5"><h2 className="text-xl font-extrabold">Side-by-side totals</h2><p className="mt-1 text-xs text-ink/45">{data.comparisonAvailable ? `${formatDate(data.period.comparison.from)} – ${formatDate(data.period.comparison.to)}` : 'Not enough comparison history yet.'}</p></div><div className="overflow-x-auto"><table className="w-full min-w-[620px] text-left text-sm"><thead className="bg-mint/50"><tr><th className="px-5 py-3">Metric</th><th className="px-5 py-3">Current</th><th className="px-5 py-3">Comparison</th><th className="px-5 py-3">Change</th></tr></thead><tbody>{keySets.map((key) => <tr className="border-t border-ink/5" key={key}><td className="px-5 py-4 font-bold">{labels[key]}</td><td className="px-5 py-4 font-extrabold">{formatMetric(key, data.metrics[key])}</td><td className="px-5 py-4">{data.comparisonAvailable ? formatMetric(key, data.comparisonMetrics[key]) : '—'}</td><td className="px-5 py-4"><Delta metricKey={key} current={data.metrics[key]} comparison={data.comparisonMetrics?.[key]} available={data.comparisonAvailable} /></td></tr>)}</tbody></table></div></section>}
-    {meeting && <section className="mt-7 grid gap-4 sm:grid-cols-3"><article className="rounded-3xl bg-brand p-5 text-white"><TrendingUp size={20} /><h2 className="mt-4 font-extrabold">Wins</h2><p className="mt-2 text-sm text-white/75">{data.metrics.completedVisits} completed visits and {formatCurrency(data.metrics.cashCollectedCents)} collected.</p></article><article className="rounded-3xl bg-[#fff4e9] p-5"><ReceiptText className="text-[#985922]" size={20} /><h2 className="mt-4 font-extrabold">Needs attention</h2><p className="mt-2 text-sm text-ink/55">{formatCurrency(data.metrics.outstandingCents)} remains outstanding.</p></article><article className="rounded-3xl bg-mint p-5"><UsersRound className="text-brand" size={20} /><h2 className="mt-4 font-extrabold">Next discussion</h2><p className="mt-2 text-sm text-ink/55">Review service demand and upcoming doctor workload.</p></article></section>}
   </div>
 }

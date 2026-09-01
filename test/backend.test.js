@@ -175,6 +175,7 @@ class MemoryStore {
       actorType: 'patient',
       actorId: this.patient.id,
       action: 'portal.login_succeeded',
+      occurredAt: input.now,
       ...input.audit,
     })
     return this.patient
@@ -197,7 +198,9 @@ class MemoryStore {
 
   async revokeSession(tokenDigest, now) {
     const session = this.sessions.get(tokenDigest)
-    if (session) session.revokedAt = now
+    if (!session || session.revokedAt) return null
+    session.revokedAt = now
+    return session.patient
   }
 
   async updatePatientPhone(patientId, phoneE164) {
@@ -228,7 +231,8 @@ class MemoryStore {
     this.audits.push({
       actorType: 'staff',
       actorId: this.staff.id,
-      action: 'staff.login_succeeded',
+      action: this.staff.role === 'super_admin' ? 'admin.login_succeeded' : 'staff.login_succeeded',
+      occurredAt: input.now,
       ...input.audit,
     })
     return this.staff
@@ -243,7 +247,9 @@ class MemoryStore {
 
   async revokeStaffSession(tokenDigest, now) {
     const session = this.staffSessions.get(tokenDigest)
-    if (session) session.revokedAt = now
+    if (!session || session.revokedAt) return null
+    session.revokedAt = now
+    return session.staff
   }
 
   async addAudit(event) {
@@ -331,7 +337,18 @@ class MemoryStore {
   }
 
   async listAdminAudit() {
-    return this.audits.filter(({ action }) => action.startsWith('admin.'))
+    return this.audits
+      .filter(({ action }) => ['portal.login_succeeded', 'portal.logout', 'staff.login_succeeded', 'staff.logout', 'admin.login_succeeded', 'admin.logout'].includes(action))
+      .map((event, index) => {
+        const staff = this.staffAccounts.find(({ id }) => id === event.actorId)
+        const patient = event.actorType === 'patient' && event.actorId === this.patient.id ? this.patient : null
+        return {
+          id: String(index), actorName: patient?.displayName || staff?.displayName,
+          category: patient ? 'patient' : staff?.role === 'dentist' ? 'doctor' : staff?.role === 'super_admin' ? 'superadmin' : 'receptionist',
+          activity: event.action.endsWith('login_succeeded') ? 'login' : 'logout',
+          occurredAt: event.occurredAt || currentTime,
+        }
+      })
   }
 
   async getDentistDashboard(dentistId, date) {
@@ -998,6 +1015,10 @@ test('direct login creates a hashed opaque session and logout revokes it', async
     headers: { origin: config.publicOrigin, cookie },
   })
   assert.equal(logout.statusCode, 204)
+  assert.deepEqual(
+    (({ actorType, actorId, action }) => ({ actorType, actorId, action }))(store.audits.at(-1)),
+    { actorType: 'patient', actorId: store.patient.id, action: 'portal.logout' },
+  )
   const afterLogout = await app.inject({ url: '/api/me', headers: { cookie } })
   assert.equal(afterLogout.statusCode, 401)
 })
@@ -1403,6 +1424,10 @@ test('reception staff use a separate protected session and can confirm booking r
       headers: { origin: config.publicOrigin, cookie },
     })
     assert.equal(logout.statusCode, 204)
+    assert.deepEqual(
+      (({ actorType, actorId, action }) => ({ actorType, actorId, action }))(staffStore.audits.at(-1)),
+      { actorType: 'staff', actorId: staffStore.staff.id, action: 'staff.logout' },
+    )
     assert.equal((await staffApp.inject({ url: '/api/staff/me', headers: { cookie } })).statusCode, 401)
   } finally {
     await staffApp.close()
@@ -1679,6 +1704,13 @@ test('super admins alone can view aggregate analytics and provision staff withou
     assert.equal(created.statusCode, 201)
     assert.equal(created.json().staff.role, 'receptionist')
     assert.equal('email' in created.json().staff, false)
+
+    const audit = await adminApp.inject({ url: '/api/admin/audit', headers: { cookie } })
+    assert.equal(audit.statusCode, 200)
+    assert.deepEqual(audit.json().events[0], {
+      id: '0', actorName: 'Clinic Owner', category: 'superadmin',
+      activity: 'login', occurredAt: '2030-01-15T04:00:00.000Z',
+    })
 
     adminStore.staff.role = 'receptionist'
     const forbidden = await adminApp.inject({ url: '/api/admin/overview', headers: { cookie } })

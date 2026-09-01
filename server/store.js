@@ -805,12 +805,16 @@ export function createStore(db) {
     },
 
     async revokeSession(tokenDigest, now) {
-      await db.query(
-        `UPDATE portal_sessions
+      const result = await db.query(
+        `UPDATE portal_sessions s
          SET revoked_at = $2
-         WHERE token_digest = $1 AND revoked_at IS NULL`,
+         FROM patients p
+         WHERE s.token_digest = $1 AND s.revoked_at IS NULL
+           AND p.id = s.patient_id
+         RETURNING p.id, p.display_name`,
         [tokenDigest, now],
       )
+      return result.rows[0] || null
     },
 
     async findActiveStaffLogin(normalizedName) {
@@ -895,12 +899,16 @@ export function createStore(db) {
     },
 
     async revokeStaffSession(tokenDigest, now) {
-      await db.query(
-        `UPDATE staff_sessions
+      const result = await db.query(
+        `UPDATE staff_sessions s
          SET revoked_at = $2
-         WHERE token_digest = $1 AND revoked_at IS NULL`,
+         FROM staff_profiles p
+         WHERE s.token_digest = $1 AND s.revoked_at IS NULL
+           AND p.id = s.staff_id
+         RETURNING p.id, p.display_name, p.role`,
         [tokenDigest, now],
       )
+      return result.rows[0] || null
     },
 
     addAudit,
@@ -1146,21 +1154,33 @@ export function createStore(db) {
 
     async listAdminAudit(limit) {
       const result = await db.query(
-        `SELECT e.id, e.action, e.object_type, e.object_id, e.occurred_at,
-                s.display_name AS actor_name
+        `SELECT e.id, e.occurred_at,
+                coalesce(p.display_name, s.display_name) AS actor_name,
+                CASE
+                  WHEN e.actor_type = 'patient' THEN 'patient'
+                  WHEN s.role = 'dentist' THEN 'doctor'
+                  WHEN s.role = 'receptionist' THEN 'receptionist'
+                  WHEN s.role = 'super_admin' THEN 'superadmin'
+                END AS category,
+                CASE WHEN e.action LIKE '%.login_succeeded' THEN 'login' ELSE 'logout' END AS activity
          FROM audit_events e
+         LEFT JOIN patients p ON p.id = e.actor_id AND e.actor_type = 'patient'
          LEFT JOIN staff_profiles s ON s.id = e.actor_id AND e.actor_type = 'staff'
-         WHERE e.action LIKE 'admin.%'
+         WHERE e.action IN (
+           'portal.login_succeeded', 'portal.logout',
+           'staff.login_succeeded', 'staff.logout',
+           'admin.login_succeeded', 'admin.logout'
+         )
+           AND (p.id IS NOT NULL OR s.role IN ('dentist', 'receptionist', 'super_admin'))
          ORDER BY e.occurred_at DESC LIMIT $1`,
         [limit],
       )
       return result.rows.map((row) => ({
         id: row.id,
-        action: row.action,
-        objectType: row.object_type,
-        objectId: row.object_id,
+        category: row.category,
+        activity: row.activity,
         occurredAt: row.occurred_at,
-        actorName: row.actor_name || 'System',
+        actorName: row.actor_name,
       }))
     },
 
