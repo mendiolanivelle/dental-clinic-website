@@ -7,6 +7,7 @@ import {
   createSocialPublisher,
   decryptSocialToken,
   encryptSocialToken,
+  medicalSafeguardsDisabled,
   normalizeSocialImage,
   SocialBlockedError,
 } from '../server/social-publishing.js'
@@ -107,6 +108,21 @@ test('speculative AI concerns do not block an otherwise safe photo', () => {
   ))
 })
 
+test('debug mode bypasses medical claims but not patient privacy', () => {
+  const job = {
+    contentType: 'educational', patientId: null, patientName: null,
+    settings, connection: { status: 'connected', encryptedAccessToken: 'encrypted' }, consent: null,
+  }
+  const analysis = {
+    patient_visible: false, minor_possible: false, personal_data_visible: false,
+    unsupported_claims: ['guaranteed cure'], promotional_rate: true,
+  }
+  assert.doesNotThrow(() => assertSocialPostPublishable(job, analysis, 'Guaranteed cure, 50% off.', { skipMedicalSafeguards: true }))
+  assert.throws(() => assertSocialPostPublishable(job, { ...analysis, personal_data_visible: true }, 'Test.', { skipMedicalSafeguards: true }), SocialBlockedError)
+  assert.equal(medicalSafeguardsDisabled({ socialDebugMedicalBypassPageId: '123' }, { connection: { pageId: '123' } }), true)
+  assert.equal(medicalSafeguardsDisabled({ socialDebugMedicalBypassPageId: '123' }, { connection: { pageId: '456' } }), false)
+})
+
 test('social photos are normalized below 2 MB and the worker publishes only once', async () => {
   const original = await sharp({
     create: { width: 2200, height: 1600, channels: 3, background: '#cfe9e4' },
@@ -179,6 +195,7 @@ test('social photos are normalized below 2 MB and the worker publishes only once
     config: {
       openRouterApiKey: 'test-openrouter-key', openRouterTextModel: 'test-text-model',
       openRouterImageModel: 'test-image-model', publicOrigin: 'https://example.com', socialTokenEncryptionKey: key,
+      socialDebugMedicalBypassPageId: null,
       metaGraphVersion: 'v25.0',
     },
     store, storage, fetchFn, now: () => new Date('2026-08-28T03:00:00.000Z'),

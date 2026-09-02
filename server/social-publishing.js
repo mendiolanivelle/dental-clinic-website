@@ -10,6 +10,9 @@ const guaranteePattern = /\b(?:guaranteed?|perfect results?|permanent results?|b
 export class SocialBlockedError extends Error {}
 export class SocialPermanentError extends Error {}
 
+export const medicalSafeguardsDisabled = (config, job) => Boolean(config.socialDebugMedicalBypassPageId)
+  && config.socialDebugMedicalBypassPageId === job.connection?.pageId
+
 const xml = (value = '') => String(value)
   .replaceAll('&', '&amp;')
   .replaceAll('<', '&lt;')
@@ -104,7 +107,7 @@ export async function normalizeSocialImage(bytes) {
   throw new SocialBlockedError('The selected photo could not be compressed below 2 MB.')
 }
 
-export const assertSocialPostPublishable = (job, analysis, caption) => {
+export const assertSocialPostPublishable = (job, analysis, caption, { skipMedicalSafeguards = false } = {}) => {
   const { settings, consent } = job
   if (!settings.automaticPublishingEnabled) throw new SocialBlockedError('Automatic publishing is disabled by the super admin.')
   if (!job.connection || job.connection.status !== 'connected' || !job.connection.encryptedAccessToken) {
@@ -123,9 +126,11 @@ export const assertSocialPostPublishable = (job, analysis, caption) => {
     throw new SocialBlockedError('A possible minor is visible and the approved guardian-consent workflow is not complete.')
   }
   if (analysis.personal_data_visible) throw new SocialBlockedError('Possible patient records or personal identifiers are visible in the photo.')
-  if (analysis.unsupported_claims?.length) throw new SocialBlockedError('The generated post contains an unsupported treatment or business claim.')
-  if (analysis.promotional_rate || promotionalPattern.test(caption)) throw new SocialBlockedError('Promotional prices, discounts, or rates are not allowed by the clinic publishing policy.')
-  if (guaranteePattern.test(caption)) throw new SocialBlockedError('The generated caption contains a guarantee or misleading outcome claim.')
+  if (!skipMedicalSafeguards) {
+    if (analysis.unsupported_claims?.length) throw new SocialBlockedError('The generated post contains an unsupported treatment or business claim.')
+    if (analysis.promotional_rate || promotionalPattern.test(caption)) throw new SocialBlockedError('Promotional prices, discounts, or rates are not allowed by the clinic publishing policy.')
+    if (guaranteePattern.test(caption)) throw new SocialBlockedError('The generated caption contains a guarantee or misleading outcome claim.')
+  }
   const prohibited = settings.prohibitedPhrases.find((phrase) => phrase && caption.toLocaleLowerCase().includes(phrase.toLocaleLowerCase()))
   if (prohibited) throw new SocialBlockedError(`The generated caption contains the prohibited phrase “${prohibited}”.`)
   if (job.patientName && caption.toLocaleLowerCase().includes(job.patientName.toLocaleLowerCase())) {
@@ -170,10 +175,10 @@ Never use a patient name or identifier. Never invent treatment, diagnosis, price
   return analysis
 }
 
-async function moderate({ config, fetchFn, caption, mimeType, imageBytes }) {
+async function moderate({ config, fetchFn, caption, mimeType, imageBytes, skipMedicalSafeguards }) {
   const result = await openRouterJson({
     config, fetchFn, label: 'OpenRouter safety review', mimeType, imageBytes,
-    prompt: `Review this proposed dental-clinic Facebook caption and its image. Flag clearly readable private or personal identifiers, deceptive or unsupported medical claims, harmful content, sexual content, harassment, hate, or dangerous content. Do not flag blurred, unreadable, or generic paperwork and screens. Caption: ${caption}`,
+    prompt: `Review this proposed dental-clinic Facebook caption and its image. Flag clearly readable private or personal identifiers, ${skipMedicalSafeguards ? '' : 'deceptive or unsupported medical claims, '}harmful content, sexual content, harassment, hate, or dangerous content. Do not flag blurred, unreadable, or generic paperwork and screens. Caption: ${caption}`,
     schema: {
       type: 'object', additionalProperties: false,
       properties: { flagged: { type: 'boolean' }, reason: { type: 'string' } },
@@ -301,8 +306,9 @@ export function createSocialPublisher({ config, store, storage, fetchFn = global
     try {
       const original = await storage.download(job.originalImage.driveFileId, MAX_IMAGE_BYTES)
       const analysis = await analyzeAndWrite({ config, fetchFn, job, imageBytes: original })
-      assertSocialPostPublishable(job, analysis, analysis.caption)
-      await moderate({ config, fetchFn, caption: analysis.caption, mimeType: job.originalImage.mimeType, imageBytes: original })
+      const skipMedicalSafeguards = medicalSafeguardsDisabled(config, job)
+      assertSocialPostPublishable(job, analysis, analysis.caption, { skipMedicalSafeguards })
+      await moderate({ config, fetchFn, caption: analysis.caption, mimeType: job.originalImage.mimeType, imageBytes: original, skipMedicalSafeguards })
       const enhanced = await enhanceImage({ config, fetchFn, storage, job, analysis, imageBytes: original })
       const branded = await applyBranding({ storage, settings: job.settings, imageBytes: enhanced })
       if (!branded.length || branded.length > MAX_IMAGE_BYTES) throw new SocialBlockedError('The final branded image could not be compressed below 2 MB.')

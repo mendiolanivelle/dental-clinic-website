@@ -153,6 +153,7 @@ Add these server-only Coolify variables before enabling the feature:
 OPENROUTER_API_KEY=<server-only OpenRouter key>
 OPENROUTER_TEXT_MODEL=google/gemini-3.1-flash-lite
 OPENROUTER_IMAGE_MODEL=google/gemini-3.1-flash-image
+SOCIAL_DEBUG_MEDICAL_BYPASS_PAGE_ID=<numeric debug Page ID only; leave empty normally>
 SOCIAL_TOKEN_ENCRYPTION_KEY=<output of: openssl rand -base64 32>
 META_GRAPH_VERSION=v25.0
 ```

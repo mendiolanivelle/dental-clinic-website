@@ -38,6 +38,7 @@ export function loadConfig(env = process.env) {
   const openRouterApiKey = env.OPENROUTER_API_KEY?.trim()
   const openRouterTextModel = env.OPENROUTER_TEXT_MODEL?.trim() || 'google/gemini-3.1-flash-lite'
   const openRouterImageModel = env.OPENROUTER_IMAGE_MODEL?.trim() || 'google/gemini-3.1-flash-image'
+  const socialDebugMedicalBypassPageId = env.SOCIAL_DEBUG_MEDICAL_BYPASS_PAGE_ID?.trim() || null
   const metaGraphVersion = env.META_GRAPH_VERSION?.trim() || 'v25.0'
   const socialTokenEncryptionKeyBase64 = env.SOCIAL_TOKEN_ENCRYPTION_KEY?.trim()
   let googleDriveCredentials
@@ -64,6 +65,9 @@ export function loadConfig(env = process.env) {
   }
   if (!/^v\d+\.0$/u.test(metaGraphVersion)) {
     errors.push('META_GRAPH_VERSION must look like v25.0')
+  }
+  if (socialDebugMedicalBypassPageId && !/^\d{5,30}$/u.test(socialDebugMedicalBypassPageId)) {
+    errors.push('SOCIAL_DEBUG_MEDICAL_BYPASS_PAGE_ID must be a numeric Facebook Page ID')
   }
 
   if (!['development', 'test', 'production'].includes(nodeEnv)) {
@@ -185,6 +189,7 @@ export function loadConfig(env = process.env) {
     openRouterApiKey,
     openRouterTextModel,
     openRouterImageModel,
+    socialDebugMedicalBypassPageId,
     metaGraphVersion,
     socialTokenEncryptionKey,
   })
