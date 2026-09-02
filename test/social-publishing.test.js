@@ -148,6 +148,7 @@ test('social photos are normalized below 2 MB and the worker publishes only once
   const files = new Map([['original', normalized], ['template', normalized]])
   let claimed = false
   let metaCalls = 0
+  let textCalls = 0
   let resolvePublished
   const published = new Promise((resolve) => { resolvePublished = resolve })
   const store = {
@@ -178,17 +179,20 @@ test('social photos are normalized below 2 MB and the worker publishes only once
   }
   const fetchFn = async (url, options) => {
     if (url === 'https://openrouter.ai/api/v1/chat/completions') {
+      textCalls += 1
       const request = JSON.parse(options?.body || '{}')
       assert.deepEqual(request.provider.only, ['google-vertex'])
       assert.equal(request.provider.zdr, true)
       const prompt = request.messages?.[0]?.content?.[0]?.text || ''
-      if (!prompt.startsWith('Review this proposed')) assert.match(prompt, /End with a friendly question\./)
-      const result = prompt.startsWith('Review this proposed') ? { flagged: false, reason: '' } : {
+      const result = prompt.startsWith('Classify this dental-clinic') ? {
+        category: 'none', reason: 'A potential fire hazard is not a publishing restriction.',
+      } : {
         caption: 'Meet the SmileCare team. Book an appointment. #SmileCare',
         patient_visible: false, minor_possible: false, personal_data_visible: false,
         clinical_image: false, unsupported_claims: [], promotional_rate: false,
         safe_to_publish: true, reasons: [],
       }
+      if (!prompt.startsWith('Classify this dental-clinic')) assert.match(prompt, /End with a friendly question\./)
       return Response.json({ choices: [{ message: { content: JSON.stringify(result) } }] })
     }
     if (url === 'https://openrouter.ai/api/v1/images') {
@@ -217,6 +221,7 @@ test('social photos are normalized below 2 MB and the worker publishes only once
     new Promise((_, reject) => setTimeout(() => reject(new Error('Publishing timed out')), 2000)),
   ])
   assert.equal(result.externalPostId, '12345_67890')
+  assert.equal(textCalls, 2)
   assert.equal(metaCalls, 1)
   assert.ok(files.get('final').length <= 2 * 1024 * 1024)
   publisher.wake()

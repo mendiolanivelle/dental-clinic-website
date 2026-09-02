@@ -175,18 +175,21 @@ Never use a patient name or identifier. Never invent treatment, diagnosis, price
   return analysis
 }
 
-async function moderate({ config, fetchFn, caption, mimeType, imageBytes, skipMedicalSafeguards }) {
+async function moderate({ config, fetchFn, caption, mimeType, imageBytes }) {
   const result = await openRouterJson({
     config, fetchFn, label: 'OpenRouter safety review', mimeType, imageBytes,
-    prompt: `Review this proposed dental-clinic Facebook caption and its image. Flag clearly readable private or personal identifiers, ${skipMedicalSafeguards ? '' : 'deceptive or unsupported medical claims, '}harmful content, sexual content, harassment, hate, or dangerous content. Do not flag blurred, unreadable, or generic paperwork and screens. Caption: ${caption}`,
+    prompt: `Classify this dental-clinic Facebook post into exactly one category: none, personal_data, sexual_content, hate_or_harassment, graphic_violence, or instructions_for_harm. Use instructions_for_harm only for explicit instructions encouraging immediate physical harm. Do not flag environmental safety concerns, potential fire or electrical hazards, clutter, infrastructure, equipment condition, general best-practice concerns, or a perceived contradiction between the photo and caption. Use personal_data only for clearly readable private identifiers. Caption: ${caption}`,
     schema: {
       type: 'object', additionalProperties: false,
-      properties: { flagged: { type: 'boolean' }, reason: { type: 'string' } },
-      required: ['flagged', 'reason'],
+      properties: {
+        category: { type: 'string', enum: ['none', 'personal_data', 'sexual_content', 'hate_or_harassment', 'graphic_violence', 'instructions_for_harm'] },
+        reason: { type: 'string' },
+      },
+      required: ['category', 'reason'],
     },
   })
-  if (result.flagged) {
-    throw new SocialBlockedError(result.reason || 'OpenRouter safety review blocked this image or caption.')
+  if (result.category !== 'none') {
+    throw new SocialBlockedError(result.reason || 'The post contains content that cannot be published automatically.')
   }
 }
 
@@ -308,7 +311,7 @@ export function createSocialPublisher({ config, store, storage, fetchFn = global
       const analysis = await analyzeAndWrite({ config, fetchFn, job, imageBytes: original })
       const skipMedicalSafeguards = medicalSafeguardsDisabled(config, job)
       assertSocialPostPublishable(job, analysis, analysis.caption, { skipMedicalSafeguards })
-      await moderate({ config, fetchFn, caption: analysis.caption, mimeType: job.originalImage.mimeType, imageBytes: original, skipMedicalSafeguards })
+      await moderate({ config, fetchFn, caption: analysis.caption, mimeType: job.originalImage.mimeType, imageBytes: original })
       const enhanced = await enhanceImage({ config, fetchFn, storage, job, analysis, imageBytes: original })
       const branded = await applyBranding({ storage, settings: job.settings, imageBytes: enhanced })
       if (!branded.length || branded.length > MAX_IMAGE_BYTES) throw new SocialBlockedError('The final branded image could not be compressed below 2 MB.')
