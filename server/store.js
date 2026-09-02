@@ -128,6 +128,8 @@ const socialSettingsFromRow = (row) => ({
   secondaryColor: row.secondary_color,
   fontFamily: row.font_family,
   brandVoice: row.brand_voice,
+  captionPrompt: row.caption_prompt || '',
+  imagePrompt: row.image_prompt || '',
   defaultLanguage: row.default_language,
   contactPhone: row.contact_phone,
   address: row.address,
@@ -1257,8 +1259,9 @@ export function createStore(db) {
            automatic_publishing_enabled = $14, daily_post_limit = $15,
            weekly_post_limit = $16, posting_start_hour = $17,
            posting_end_hour = $18, font_family = $19,
-           logo_drive_file_id = coalesce($20, logo_drive_file_id),
-           logo_mime_type = coalesce($21, logo_mime_type), updated_at = $22
+           caption_prompt = $20, image_prompt = $21,
+           logo_drive_file_id = coalesce($22, logo_drive_file_id),
+           logo_mime_type = coalesce($23, logo_mime_type), updated_at = $24
          WHERE id = 1 RETURNING *`,
         [
           settings.clinicName, settings.primaryColor, settings.secondaryColor,
@@ -1268,7 +1271,7 @@ export function createStore(db) {
           settings.patientPostsEnabled, settings.minorPostsEnabled,
           settings.automaticPublishingEnabled, settings.dailyPostLimit,
           settings.weeklyPostLimit, settings.postingStartHour, settings.postingEndHour,
-          settings.fontFamily,
+          settings.fontFamily, settings.captionPrompt, settings.imagePrompt,
           settings.logoDriveFileId, settings.logoMimeType, now,
         ],
       )

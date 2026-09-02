@@ -11,6 +11,8 @@ const formFrom = (settings) => ({
   secondaryColor: settings.secondaryColor || '#DFF3EF',
   fontFamily: settings.fontFamily || 'Arial',
   brandVoice: settings.brandVoice || '',
+  captionPrompt: settings.captionPrompt || '',
+  imagePrompt: settings.imagePrompt || '',
   defaultLanguage: settings.defaultLanguage || 'taglish',
   contactPhone: settings.contactPhone || '',
   address: settings.address || '',
@@ -67,6 +69,8 @@ export default function AdminSocialPage() {
         secondaryColor: next.secondaryColor,
         fontFamily: next.fontFamily,
         brandVoice: next.brandVoice.trim(),
+        captionPrompt: next.captionPrompt.trim(),
+        imagePrompt: next.imagePrompt.trim(),
         defaultLanguage: next.defaultLanguage,
         contactPhone: next.contactPhone.trim() || null,
         address: next.address.trim() || null,
@@ -179,6 +183,8 @@ export default function AdminSocialPage() {
         <label className="text-xs font-extrabold">Secondary color<input className="mt-2 h-12 w-full rounded-xl border border-ink/10 bg-white p-1" type="color" value={form.secondaryColor} onChange={(event) => setForm({ ...form, secondaryColor: event.target.value })} /></label>
         <label className="text-xs font-extrabold">Brand font<select className="input-field mt-2" value={form.fontFamily} onChange={(event) => setForm({ ...form, fontFamily: event.target.value })}><option>Arial</option><option>Georgia</option><option>Verdana</option></select></label>
         <label className="text-xs font-extrabold md:col-span-2">Brand voice<textarea className="input-field mt-2 min-h-20" maxLength="500" required value={form.brandVoice} onChange={(event) => setForm({ ...form, brandVoice: event.target.value })} /></label>
+        <label className="text-xs font-extrabold md:col-span-2">Caption AI prompt<textarea className="input-field mt-2 min-h-28" maxLength="3000" placeholder="Example: Write two short Taglish paragraphs with a friendly question at the end." value={form.captionPrompt} onChange={(event) => setForm({ ...form, captionPrompt: event.target.value })} /><span className="mt-1 block font-normal text-ink/40">Applied to every generated caption.</span></label>
+        <label className="text-xs font-extrabold md:col-span-2">Image generation AI prompt<textarea className="input-field mt-2 min-h-28" maxLength="3000" placeholder="Example: Use a clean teal-and-white layout with soft natural lighting and generous spacing." value={form.imagePrompt} onChange={(event) => setForm({ ...form, imagePrompt: event.target.value })} /><span className="mt-1 block font-normal text-ink/40">Applied with the saved template photos when AI image editing is safe.</span></label>
         <label className="text-xs font-extrabold">Caption language<select className="input-field mt-2" value={form.defaultLanguage} onChange={(event) => setForm({ ...form, defaultLanguage: event.target.value })}><option value="english">English</option><option value="filipino">Filipino</option><option value="taglish">Taglish</option></select></label>
         <label className="text-xs font-extrabold">Contact number<input className="input-field mt-2" maxLength="80" value={form.contactPhone} onChange={(event) => setForm({ ...form, contactPhone: event.target.value })} /></label>
         <label className="text-xs font-extrabold">Address<input className="input-field mt-2" maxLength="300" value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} /></label>

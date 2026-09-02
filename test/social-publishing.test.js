@@ -17,6 +17,8 @@ const settings = {
   secondaryColor: '#DFF3EF',
   fontFamily: 'Arial',
   brandVoice: 'Warm and professional',
+  captionPrompt: 'End with a friendly question.',
+  imagePrompt: 'Use a clean teal-and-white layout.',
   defaultLanguage: 'taglish',
   contactPhone: '09123456789',
   address: null,
@@ -153,6 +155,7 @@ test('social photos are normalized below 2 MB and the worker publishes only once
       assert.deepEqual(request.provider.only, ['google-vertex'])
       assert.equal(request.provider.zdr, true)
       const prompt = request.messages?.[0]?.content?.[0]?.text || ''
+      if (!prompt.startsWith('Review this proposed')) assert.match(prompt, /End with a friendly question\./)
       const result = prompt.startsWith('Review this proposed') ? { flagged: false, reason: '' } : {
         caption: 'Meet the SmileCare team. Book an appointment. #SmileCare',
         patient_visible: false, minor_possible: false, personal_data_visible: false,
@@ -166,6 +169,7 @@ test('social photos are normalized below 2 MB and the worker publishes only once
       assert.deepEqual(request.provider.only, ['google-vertex/global'])
       assert.equal(request.provider.zdr, true)
       assert.equal(request.input_references.length, 2)
+      assert.match(request.prompt, /Use a clean teal-and-white layout\./)
       return Response.json({ data: [{ b64_json: normalized.toString('base64') }] })
     }
     if (url.endsWith('/12345/photos')) { metaCalls += 1; return Response.json({ post_id: '12345_67890' }) }
