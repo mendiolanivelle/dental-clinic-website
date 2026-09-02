@@ -164,7 +164,7 @@ test('social photos are normalized below 2 MB and the worker publishes only once
     async claimNextSocialPost() { if (claimed) return null; claimed = true; return 'post-1' },
     async getSocialPostForProcessing() {
       return {
-        id: 'post-1', contentType: 'educational', description: 'Welcome our clinic team.',
+        id: 'post-1', contentType: 'clinic_team', description: 'Welcome our clinic team.',
         patientId: null, patientName: null,
         settings: { ...settings, templates: [{ id: 'template-1', driveFileId: 'template', mimeType: 'image/jpeg' }] },
         originalImage: { driveFileId: 'original', mimeType: 'image/jpeg' },
@@ -201,7 +201,10 @@ test('social photos are normalized below 2 MB and the worker publishes only once
         clinical_image: false, unsupported_claims: [], promotional_rate: false,
         safe_to_publish: true, reasons: [],
       }
-      if (!prompt.startsWith('Classify this dental-clinic')) assert.match(prompt, /End with a friendly question\./)
+      if (!prompt.startsWith('Classify this dental-clinic')) {
+        assert.match(prompt, /Mandatory super-admin caption instructions: End with a friendly question\./)
+        assert.match(prompt, /Follow these instructions exactly/)
+      }
       return Response.json({ choices: [{ message: { content: JSON.stringify(result) } }] })
     }
     if (url === 'https://openrouter.ai/api/v1/images') {
@@ -209,7 +212,8 @@ test('social photos are normalized below 2 MB and the worker publishes only once
       assert.deepEqual(request.provider.only, ['google-vertex/global'])
       assert.equal(request.provider.zdr, true)
       assert.equal(request.input_references.length, 2)
-      assert.match(request.prompt, /Use a clean teal-and-white layout\./)
+      assert.match(request.prompt, /Using the template is mandatory/)
+      assert.match(request.prompt, /Mandatory super-admin image instructions: Use a clean teal-and-white layout\./)
       return Response.json({ data: [{ b64_json: normalized.toString('base64') }] })
     }
     if (url.endsWith('/12345/photos')) { metaCalls += 1; return Response.json({ post_id: '12345_67890' }) }

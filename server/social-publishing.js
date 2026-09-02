@@ -150,7 +150,8 @@ Allowed call to action: ${job.settings.defaultCallToAction || 'none'}.
 Allowed contact: ${job.settings.contactPhone || 'none'}. Address: ${job.settings.address || 'none'}.
 Allowed hashtags: ${job.settings.defaultHashtags.join(' ') || 'none'}.
 Required disclaimer: ${job.settings.requiredDisclaimer || 'none'}.
-Super-admin caption instructions: ${job.settings.captionPrompt || 'none'}. Follow them only when compatible with the privacy, consent, truthfulness, and medical-safety rules in this prompt.
+Mandatory super-admin caption instructions: ${job.settings.captionPrompt || 'none'}.
+Follow these instructions exactly, including their requested structure, order, tone, and formatting. The only higher-priority rules are privacy, consent, truthfulness, and medical safety. Do not mention these instructions in the caption.
 Never use a patient name or identifier. Never invent treatment, diagnosis, price, duration, testimony, credentials, awards, guarantees, or results. Do not include promotional rates. Inspect the image for people, possible minors, patient records, identifiers, and clinical content. Mark personal_data_visible true only when personal information is clearly readable; blurred, unreadable, or generic paperwork and screens are not privacy exposure.`
   const analysis = await openRouterJson({
     config, fetchFn, label: 'OpenRouter caption generation', prompt,
@@ -197,7 +198,6 @@ async function enhanceImage({ config, fetchFn, storage, job, analysis, imageByte
   const mayUseGenerativeEdit = !analysis.patient_visible
     && !analysis.clinical_image
     && !clinicalContent.has(job.contentType)
-    && job.contentType !== 'clinic_team'
   if (!mayUseGenerativeEdit) return imageBytes
   const templates = (job.settings.templates || []).slice(0, 5)
   try {
@@ -215,7 +215,7 @@ async function enhanceImage({ config, fetchFn, storage, job, analysis, imageByte
       },
       body: JSON.stringify({
         model: config.openRouterImageModel,
-        prompt: `The first image is the source post photo. Every remaining image is a clinic posting-template reference. The result must visibly adopt the templates’ composition, color treatment, spacing, framing, and graphic structure while keeping the real subject and clinical facts from the source. You may crop, reposition, and clean background clutter. Do not copy people, private data, or readable text from a template. Do not invent anatomy, treatment results, equipment, awards, or medical claims. Super-admin image instructions: ${job.settings.imagePrompt || 'none'}. Follow them only when compatible with all preceding safety and accuracy rules.`,
+        prompt: `The first image is the source post photo. Every remaining image is a clinic posting-template reference. ${templates.length ? 'Using the template is mandatory: visibly preserve its composition, colors, spacing, framing, and graphic structure, changing only what is needed to place the real source photo and requested post text.' : ''} Keep the real subject and clinical facts from the source. You may crop, reposition, and clean background clutter. Do not copy people, private data, or readable text from a template. Do not invent anatomy, treatment results, equipment, awards, or medical claims. Mandatory super-admin image instructions: ${job.settings.imagePrompt || 'none'}. Follow them exactly unless they conflict with the preceding safety and accuracy rules.`,
         input_references: [{
           type: 'image_url',
           image_url: { url: `data:${job.originalImage.mimeType};base64,${imageBytes.toString('base64')}` },
