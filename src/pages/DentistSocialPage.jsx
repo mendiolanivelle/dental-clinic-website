@@ -4,6 +4,7 @@ import { api } from '../api'
 import { EmptyState, ErrorState, LoadingState } from '../components/PageState'
 import { formatDateTime, titleCase } from '../format'
 import { prepareSocialImage } from '../socialImage'
+import { randomUuid } from '../uuid'
 
 const types = [
   ['clinic_team', 'Clinic or team'],
@@ -63,7 +64,7 @@ export default function DentistSocialPage() {
     try {
       const image = await prepareSocialImage(form.file)
       await api.createDentistSocialPost({
-        submissionId: crypto.randomUUID(),
+        submissionId: randomUuid(),
         contentType: form.contentType,
         description: form.description.trim(),
         image,
