@@ -202,8 +202,9 @@ test('social photos are normalized below 2 MB and the worker publishes only once
         safe_to_publish: true, reasons: [],
       }
       if (!prompt.startsWith('Classify this dental-clinic')) {
-        assert.match(prompt, /Mandatory super-admin caption instructions: End with a friendly question\./)
-        assert.match(prompt, /Follow these instructions exactly/)
+        assert.ok(prompt.startsWith(settings.captionPrompt))
+        assert.match(prompt, /Dentist request: Welcome our clinic team\./)
+        assert.doesNotMatch(prompt, /automatic publishing safety editor|Mandatory super-admin/u)
       }
       return Response.json({ choices: [{ message: { content: JSON.stringify(result) } }] })
     }
@@ -212,8 +213,9 @@ test('social photos are normalized below 2 MB and the worker publishes only once
       assert.deepEqual(request.provider.only, ['google-vertex/global'])
       assert.equal(request.provider.zdr, true)
       assert.equal(request.input_references.length, 2)
-      assert.match(request.prompt, /Using the template is mandatory/)
-      assert.match(request.prompt, /Mandatory super-admin image instructions: Use a clean teal-and-white layout\./)
+      assert.ok(request.prompt.startsWith(settings.imagePrompt))
+      assert.match(request.prompt, /remaining 1 image\(s\) are the Super Admin's posting templates/)
+      assert.doesNotMatch(request.prompt, /Using the template is mandatory|Mandatory super-admin/u)
       return Response.json({ data: [{ b64_json: normalized.toString('base64') }] })
     }
     if (url.endsWith('/12345/photos')) { metaCalls += 1; return Response.json({ post_id: '12345_67890' }) }
