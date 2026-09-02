@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Camera, ExternalLink, ImageUp, Megaphone, RefreshCw, Send, ShieldCheck } from 'lucide-react'
+import { Camera, ExternalLink, ImageUp, Megaphone, RefreshCw, Send } from 'lucide-react'
 import { api } from '../api'
 import { EmptyState, ErrorState, LoadingState } from '../components/PageState'
 import { formatDateTime, titleCase } from '../format'
@@ -18,9 +18,7 @@ const patientTypes = new Set(['patient_portrait', 'before_after', 'intraoral_cli
 const activeStatuses = new Set(['confirmed', 'ai_processing', 'branding', 'automatic_validation', 'publishing'])
 
 const emptyForm = () => ({
-  contentType: 'clinic_team', description: '', patientId: '', file: null,
-  consentEvidence: '', coversPublicSocialMedia: false, coversAiProcessing: false,
-  subjectIsMinor: false, guardianName: '',
+  contentType: 'clinic_team', description: '', file: null,
 })
 
 const statusStyle = (status) => ({
@@ -32,7 +30,6 @@ const statusStyle = (status) => ({
 
 export default function DentistSocialPage() {
   const [state, setState] = useState({ loading: true, posts: [], publishing: null, error: null })
-  const [patients, setPatients] = useState([])
   const [form, setForm] = useState(emptyForm)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
@@ -48,7 +45,7 @@ export default function DentistSocialPage() {
       .catch((error) => setState((current) => ({ ...current, loading: false, error })))
   }, [])
 
-  useEffect(() => { load(); api.searchDentistSocialPatients('').then(({ patients: found = [] }) => setPatients(found)).catch(() => {}) }, [load])
+  useEffect(() => { load() }, [load])
   useEffect(() => {
     if (!state.posts.some(({ status }) => activeStatuses.has(status))) return undefined
     const timer = setInterval(() => load(true), 5000)
@@ -61,11 +58,7 @@ export default function DentistSocialPage() {
     setMessage('')
     if (!form.file) { setFormError('Take or choose a photo first.'); return }
     const patientPost = patientTypes.has(form.contentType)
-    if (patientPost && (!form.patientId || !form.consentEvidence.trim() || !form.coversPublicSocialMedia || !form.coversAiProcessing)) {
-      setFormError('Choose the patient and confirm the specific Facebook and AI-processing consent.'); return
-    }
-    if (form.subjectIsMinor && !form.guardianName.trim()) { setFormError('Record the consenting guardian’s name.'); return }
-    if (!window.confirm(`This photo will be processed using AI, branded for the clinic, automatically validated, and published to ${state.publishing?.pageName || 'the connected Facebook Page'}. There will be no additional approval screen. Continue?`)) return
+    if (!window.confirm(`${patientPost ? 'By continuing, you confirm the signed patient or guardian paper consent is on file. ' : ''}This photo will be processed using AI, branded for the clinic, automatically validated, and published to ${state.publishing?.pageName || 'the connected Facebook Page'}. Continue?`)) return
     setBusy(true)
     try {
       const image = await prepareSocialImage(form.file)
@@ -73,16 +66,7 @@ export default function DentistSocialPage() {
         submissionId: crypto.randomUUID(),
         contentType: form.contentType,
         description: form.description.trim(),
-        patientId: patientPost ? form.patientId : null,
         image,
-        consent: patientPost ? {
-          evidence: form.consentEvidence.trim(),
-          coversPublicSocialMedia: form.coversPublicSocialMedia,
-          coversAiProcessing: form.coversAiProcessing,
-          subjectIsMinor: form.subjectIsMinor,
-          guardianName: form.guardianName.trim() || null,
-          grantedAt: new Date().toISOString(),
-        } : null,
       })
       setForm(emptyForm())
       setMessage('Confirmed. The system is now processing and will publish automatically after validation.')
@@ -120,14 +104,8 @@ export default function DentistSocialPage() {
           <label className="block text-sm font-extrabold">Content type<select className="input-field mt-2" value={form.contentType} onChange={(event) => setForm({ ...form, contentType: event.target.value })}>{types.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           <label className="mt-5 block text-sm font-extrabold">What should the post say?<textarea className="input-field mt-2 min-h-32" maxLength="2000" placeholder="Example: Welcome our new dental chair and invite patients to book a consultation." required value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>
           {patientPost && <section className="mt-5 rounded-2xl border border-[#d9a57f]/35 bg-[#fff8f2] p-4">
-            <div className="flex items-center gap-2 text-sm font-extrabold text-[#783e1c]"><ShieldCheck size={17} /> Patient publication consent</div>
+            <p className="text-xs font-bold leading-5 text-[#783e1c]">Keep the signed patient or guardian paper consent at the clinic. Publishing confirms that the signed copy covers Facebook posting and AI processing.</p>
             {!state.publishing?.patientPostsEnabled && <p className="mt-2 text-xs font-bold text-[#914b22]">The super admin has disabled patient posts.</p>}
-            <label className="mt-4 block text-xs font-extrabold">Patient<select className="input-field mt-2" required value={form.patientId} onChange={(event) => setForm({ ...form, patientId: event.target.value })}><option value="">Choose patient</option>{patients.map((patient) => <option key={patient.id} value={patient.id}>{patient.displayName} · {patient.patientNumber}</option>)}</select></label>
-            <label className="mt-4 block text-xs font-extrabold">Consent evidence<textarea className="input-field mt-2 min-h-20" maxLength="500" placeholder="Example: Signed social-media consent form dated…" required value={form.consentEvidence} onChange={(event) => setForm({ ...form, consentEvidence: event.target.value })} /></label>
-            <label className="mt-4 flex gap-2 text-xs font-bold"><input checked={form.coversPublicSocialMedia} type="checkbox" onChange={(event) => setForm({ ...form, coversPublicSocialMedia: event.target.checked })} /> Consent specifically covers public Facebook posting.</label>
-            <label className="mt-3 flex gap-2 text-xs font-bold"><input checked={form.coversAiProcessing} type="checkbox" onChange={(event) => setForm({ ...form, coversAiProcessing: event.target.checked })} /> Consent specifically covers AI processing.</label>
-            <label className="mt-3 flex gap-2 text-xs font-bold"><input checked={form.subjectIsMinor} type="checkbox" onChange={(event) => setForm({ ...form, subjectIsMinor: event.target.checked })} /> The patient is a minor.</label>
-            {form.subjectIsMinor && <label className="mt-4 block text-xs font-extrabold">Guardian name<input className="input-field mt-2" maxLength="160" required value={form.guardianName} onChange={(event) => setForm({ ...form, guardianName: event.target.value })} /></label>}
           </section>}
           <button className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-brand px-5 py-3.5 text-sm font-extrabold text-white disabled:opacity-50" disabled={busy || !ready || (patientPost && !state.publishing?.patientPostsEnabled)} type="submit"><Send size={17} />{busy ? 'Confirming…' : 'Confirm and publish automatically'}</button>
         </div>

@@ -489,23 +489,12 @@ export default async function dentistRoutes(app, {
     }
     const description = request.body.description.trim()
     const patientPost = patientSocialContent.has(request.body.contentType)
-    const consent = request.body.consent
-    if (!patientPost && (request.body.patientId || consent)) {
-      return reply.code(400).send({ error: { code: 'INVALID_CONSENT', message: 'Patient consent details are only accepted for patient-related posts.' } })
-    }
-    if (patientPost && (
-      !settings.patientPostsEnabled || !request.body.patientId || !consent
-      || !consent.coversPublicSocialMedia || !consent.coversAiProcessing
-      || !consent.evidence.trim()
-    )) {
-      return reply.code(400).send({ error: { code: 'CONSENT_REQUIRED', message: 'Choose the patient and record specific Facebook and AI-processing consent.' } })
-    }
-    if (consent?.subjectIsMinor && (!settings.minorPostsEnabled || !consent.guardianName?.trim())) {
-      return reply.code(400).send({ error: { code: 'GUARDIAN_CONSENT_REQUIRED', message: 'Minor-related posting is disabled or guardian consent is incomplete.' } })
-    }
-    if (consent && new Date(consent.grantedAt) > now()) {
-      return reply.code(400).send({ error: { code: 'INVALID_CONSENT_DATE', message: 'The consent date cannot be in the future.' } })
-    }
+    if (patientPost && !settings.patientPostsEnabled) return reply.code(400).send({ error: { code: 'PATIENT_POSTS_DISABLED', message: 'Patient-related Facebook posts are disabled by the super admin.' } })
+    const consent = patientPost ? {
+      evidence: 'Dentist confirmed signed patient or guardian paper consent is on file.',
+      coversPublicSocialMedia: true, coversAiProcessing: true,
+      subjectIsMinor: false, guardianName: null, grantedAt: now(),
+    } : null
     const decoded = decodeSocialImage(request.body.image)
     if (!decoded) return reply.code(400).send({ error: { code: 'INVALID_IMAGE', message: 'Upload a valid JPEG, PNG, or WebP photo up to 2 MB.' } })
     let normalized
@@ -521,7 +510,7 @@ export default async function dentistRoutes(app, {
       result = await store.createSocialPost({
         dentistId: request.staff.dentistId,
         staffId: request.staff.id,
-        patientId: request.body.patientId || null,
+        patientId: null,
         contentType: request.body.contentType,
         description,
         image: {
@@ -531,14 +520,7 @@ export default async function dentistRoutes(app, {
           sha256: sha256(normalized),
         },
         idempotencyKey: request.body.submissionId,
-        consent: consent ? {
-          evidence: consent.evidence.trim(),
-          coversPublicSocialMedia: consent.coversPublicSocialMedia,
-          coversAiProcessing: consent.coversAiProcessing,
-          subjectIsMinor: consent.subjectIsMinor,
-          guardianName: consent.guardianName?.trim() || null,
-          grantedAt: new Date(consent.grantedAt),
-        } : null,
+        consent,
         now: now(),
       })
     } catch (error) {

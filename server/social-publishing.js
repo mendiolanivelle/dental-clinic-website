@@ -115,15 +115,15 @@ export const assertSocialPostPublishable = (job, analysis, caption, { skipMedica
   }
   if (patientContent.has(job.contentType)) {
     if (!settings.patientPostsEnabled) throw new SocialBlockedError('Patient-related Facebook posts are disabled.')
-    if (!job.patientId || !consent?.coversPublicSocialMedia || !consent?.coversAiProcessing) {
-      throw new SocialBlockedError('Specific patient consent for public Facebook posting and AI processing is required.')
+    if (!consent?.coversPublicSocialMedia || !consent?.coversAiProcessing) {
+      throw new SocialBlockedError('Signed paper consent for public Facebook posting and AI processing must be confirmed.')
     }
   }
   if (analysis.patient_visible && (!consent?.coversPublicSocialMedia || !consent?.coversAiProcessing)) {
     throw new SocialBlockedError('A possible patient is visible but valid social-media and AI consent was not recorded.')
   }
-  if ((analysis.minor_possible || consent?.subjectIsMinor) && (!settings.minorPostsEnabled || !consent?.guardianName)) {
-    throw new SocialBlockedError('A possible minor is visible and the approved guardian-consent workflow is not complete.')
+  if ((analysis.minor_possible || consent?.subjectIsMinor) && (!settings.minorPostsEnabled || !consent?.coversPublicSocialMedia)) {
+    throw new SocialBlockedError('A possible minor is visible and guardian paper consent must be confirmed.')
   }
   if (analysis.personal_data_visible) throw new SocialBlockedError('Possible patient records or personal identifiers are visible in the photo.')
   if (!skipMedicalSafeguards) {

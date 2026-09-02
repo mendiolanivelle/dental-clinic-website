@@ -135,6 +135,10 @@ test('the backend role stays least-privilege and the forward migration removes O
     new URL('../migrations/025_social_custom_prompts.sql', import.meta.url),
     'utf8',
   )
+  const paperSocialConsentSql = await readFile(
+    new URL('../migrations/026_paper_social_consent.sql', import.meta.url),
+    'utf8',
+  )
   const adminAuditReadSql = await readFile(
     new URL('../migrations/023_admin_audit_read.sql', import.meta.url),
     'utf8',
@@ -247,6 +251,7 @@ test('the backend role stays least-privilege and the forward migration removes O
   assert.doesNotMatch(socialTemplatesSql, /GRANT[^;]*\b(?:anon|authenticated|service_role)\b/i)
   assert.match(socialPromptsSql, /ADD COLUMN caption_prompt text NOT NULL DEFAULT ''/i)
   assert.match(socialPromptsSql, /ADD COLUMN image_prompt text NOT NULL DEFAULT ''/i)
+  assert.match(paperSocialConsentSql, /ALTER COLUMN patient_id DROP NOT NULL/i)
   assert.match(adminAuditReadSql, /GRANT SELECT ON dental_portal\.audit_events TO dental_portal_backend/i)
   assert.doesNotMatch(adminAuditReadSql, /\b(?:INSERT|UPDATE|DELETE|anon|authenticated|service_role)\b/i)
   assert.match(doctorNameTitlesSql, /UPDATE dental_portal\.staff_profiles[\s\S]*WHERE role = 'dentist'/i)

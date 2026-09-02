@@ -91,6 +91,16 @@ test('social tokens are encrypted and patient posts fail closed without specific
     { patient_visible: true, unsupported_claims: [], safe_to_publish: true },
     'A friendly clinic visit.',
   ), SocialBlockedError)
+  assert.doesNotThrow(() => assertSocialPostPublishable(
+    {
+      contentType: 'patient_portrait', patientId: null, patientName: null,
+      settings: { ...settings, patientPostsEnabled: true },
+      connection: { status: 'connected', encryptedAccessToken: encrypted },
+      consent: { coversPublicSocialMedia: true, coversAiProcessing: true },
+    },
+    { patient_visible: true, unsupported_claims: [], safe_to_publish: true },
+    'A friendly clinic visit.',
+  ))
 })
 
 test('speculative AI concerns do not block an otherwise safe photo', () => {
