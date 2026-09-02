@@ -1,6 +1,5 @@
-import { MAX_PRESCRIPTION_IMAGE_BYTES, preparePrescriptionImage } from './prescriptionImage'
-
-const heicTypes = new Set(['image/heic', 'image/heif'])
+const allowedTypes = new Set(['image/jpeg', 'image/png', 'image/webp'])
+const MAX_SOCIAL_SOURCE_IMAGE_BYTES = 20 * 1024 * 1024
 
 const toBase64 = (file) => new Promise((resolve, reject) => {
   const reader = new FileReader()
@@ -10,15 +9,15 @@ const toBase64 = (file) => new Promise((resolve, reject) => {
 })
 
 export async function prepareSocialImage(file) {
-  if (heicTypes.has(file?.type)) {
-    if (file.size > MAX_PRESCRIPTION_IMAGE_BYTES) {
-      throw new Error('This HEIC photo is over 2 MB. Choose a smaller photo or save it as JPEG first.')
-    }
-    return {
-      imageBase64: await toBase64(file),
-      imageMimeType: file.type,
-      imageOriginalName: file.name || 'clinic-photo.heic',
-    }
+  if (!file || !allowedTypes.has(file.type)) {
+    throw new Error('Take or choose a clear JPEG, PNG, or WebP photo.')
   }
-  return preparePrescriptionImage(file)
+  if (file.size > MAX_SOCIAL_SOURCE_IMAGE_BYTES) {
+    throw new Error('This photo is over 20 MB. Choose a smaller photo.')
+  }
+  return {
+    imageBase64: await toBase64(file),
+    imageMimeType: file.type,
+    imageOriginalName: file.name || 'clinic-photo.jpg',
+  }
 }

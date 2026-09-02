@@ -11,6 +11,7 @@ import {
   normalizeSocialImage,
   SocialBlockedError,
 } from '../server/social-publishing.js'
+import { decodeSocialImage } from '../server/routes/dentist.js'
 
 const settings = {
   clinicName: 'SmileCare Dental Clinic',
@@ -221,4 +222,16 @@ test('social photos are normalized below 2 MB and the worker publishes only once
   publisher.wake()
   await new Promise((resolve) => setTimeout(resolve, 25))
   assert.equal(metaCalls, 1)
+})
+
+test('large phone JPEGs reach server-side normalization', () => {
+  const bytes = Buffer.alloc(3 * 1024 * 1024)
+  bytes.set([0xff, 0xd8, 0xff])
+  const decoded = decodeSocialImage({
+    imageBase64: bytes.toString('base64'),
+    imageMimeType: 'image/jpeg',
+    imageOriginalName: 'iphone-photo.jpg',
+  })
+  assert.equal(decoded.bytes.length, bytes.length)
+  assert.equal(decoded.originalName, 'iphone-photo.jpg')
 })
