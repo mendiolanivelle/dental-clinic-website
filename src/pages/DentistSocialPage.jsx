@@ -96,7 +96,7 @@ export default function DentistSocialPage() {
     <form className="rounded-3xl bg-white p-5 soft-shadow sm:p-7" onSubmit={submit}>
       <div className="grid gap-6 lg:grid-cols-[.9fr_1.1fr]">
         <div>
-          <label className="block text-sm font-extrabold">Take or upload a photo<input accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" className="mt-3 block w-full text-xs text-ink/55" required type="file" onChange={(event) => setForm({ ...form, file: event.target.files?.[0] || null })} /></label>
+          <label className="block text-sm font-extrabold">Take or upload a photo<input accept="image/jpeg,image/png,image/webp" capture="environment" className="mt-3 block w-full text-xs text-ink/55" required type="file" onChange={(event) => setForm({ ...form, file: event.target.files?.[0] || null })} /></label>
           <div className="mt-4 grid aspect-square place-items-center overflow-hidden rounded-3xl bg-cream text-ink/35">{preview ? <img alt="Selected post preview" className="h-full w-full object-cover" src={preview} /> : <div className="text-center"><Camera className="mx-auto" size={34} /><p className="mt-2 text-xs font-bold">Photo preview</p></div>}</div>
           <p className="mt-3 text-xs leading-5 text-ink/45">Photos are normalized, stripped of location metadata, and compressed to 2 MB or less.</p>
         </div>

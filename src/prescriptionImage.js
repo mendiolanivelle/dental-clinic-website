@@ -1,7 +1,6 @@
 export const MAX_PRESCRIPTION_IMAGE_BYTES = 2 * 1024 * 1024
 
-const heicTypes = new Set(['image/heic', 'image/heif'])
-const allowedTypes = new Set(['image/jpeg', 'image/png', 'image/webp', ...heicTypes])
+const allowedTypes = new Set(['image/jpeg', 'image/png', 'image/webp'])
 
 const toBase64 = (blob) => new Promise((resolve, reject) => {
   const reader = new FileReader()
@@ -18,7 +17,7 @@ export async function preparePrescriptionImage(file) {
   if (!file || !allowedTypes.has(file.type)) {
     throw new Error('Take or choose a clear JPEG, PNG, or WebP photo.')
   }
-  if (file.size <= MAX_PRESCRIPTION_IMAGE_BYTES && !heicTypes.has(file.type)) {
+  if (file.size <= MAX_PRESCRIPTION_IMAGE_BYTES) {
     return {
       imageBase64: await toBase64(file),
       imageMimeType: file.type,
@@ -57,5 +56,5 @@ export async function preparePrescriptionImage(file) {
   } finally {
     URL.revokeObjectURL(url)
   }
-  throw new Error('The photo could not be converted and compressed below 2 MB. Try a clearer, smaller photo.')
+  throw new Error('The prescription photo could not be compressed below 2 MB. Try a clearer, smaller photo.')
 }
