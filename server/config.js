@@ -40,6 +40,8 @@ export function loadConfig(env = process.env) {
   const openRouterImageModel = env.OPENROUTER_IMAGE_MODEL?.trim() || 'google/gemini-3.1-flash-image'
   const socialDebugMedicalBypassPageId = env.SOCIAL_DEBUG_MEDICAL_BYPASS_PAGE_ID?.trim() || null
   const metaGraphVersion = env.META_GRAPH_VERSION?.trim() || 'v25.0'
+  const metaAppId = env.META_APP_ID?.trim() || null
+  const metaAppSecret = env.META_APP_SECRET?.trim() || null
   const socialTokenEncryptionKeyBase64 = env.SOCIAL_TOKEN_ENCRYPTION_KEY?.trim()
   let googleDriveCredentials
   let socialTokenEncryptionKey
@@ -191,6 +193,8 @@ export function loadConfig(env = process.env) {
     openRouterImageModel,
     socialDebugMedicalBypassPageId,
     metaGraphVersion,
+    metaAppId,
+    metaAppSecret,
     socialTokenEncryptionKey,
   })
 }

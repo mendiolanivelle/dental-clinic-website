@@ -1543,6 +1543,17 @@ export function createStore(db) {
       )
     },
 
+    async retrySocialPost(id, now) {
+      const result = await db.query(
+        `UPDATE social_posts SET status = 'confirmed', blocking_reason = NULL,
+           retry_count = 0, next_attempt_at = $2, locked_at = NULL,
+           failed_at = NULL, updated_at = $2
+         WHERE id = $1 AND status = 'failed' RETURNING id`,
+        [id, now],
+      )
+      return Boolean(result.rowCount)
+    },
+
     async markSocialPostRemoved(id, now) {
       const result = await db.query(
         `UPDATE social_posts SET status = 'removed', removed_at = $2, updated_at = $2

@@ -262,6 +262,9 @@ async function applyBranding({ storage, settings, imageBytes }) {
 
 const graphError = async (label, response) => {
   const payload = await response.json().catch(() => null)
+  if (String(payload?.error?.code) === '190') {
+    return new SocialPermanentError(`${label} failed: the Facebook access token is invalid or expired. Reconnect the Page with a long-lived Page token.`)
+  }
   const message = payload?.error?.message || `HTTP ${response.status}`
   const ErrorType = response.status === 429 || response.status >= 500 ? Error : SocialPermanentError
   return new ErrorType(`${label} failed: ${message}`)
@@ -274,15 +277,45 @@ export function createSocialPublisher({ config, store, storage, fetchFn = global
   const pageToken = (encrypted) => decryptSocialToken(encrypted, config.socialTokenEncryptionKey)
   const graphBase = `https://graph.facebook.com/${config.metaGraphVersion}`
 
-  const verifyPage = async ({ pageId, accessToken }) => {
-    if (!config.socialTokenEncryptionKey) throw new SocialPermanentError('Configure SOCIAL_TOKEN_ENCRYPTION_KEY before connecting Facebook.')
-    const response = await fetchFn(`${graphBase}/${encodeURIComponent(pageId)}?fields=id,name`, {
+  const readPage = async (pageId, accessToken, fields = 'id,name') => {
+    const response = await fetchFn(`${graphBase}/${encodeURIComponent(pageId)}?fields=${fields}`, {
       headers: { authorization: `Bearer ${accessToken}` },
     })
     if (!response.ok) throw await graphError('Facebook Page verification', response)
-    const page = await response.json()
+    return response.json()
+  }
+
+  const exchangeForLongLivedPageToken = async (pageId, userToken) => {
+    if (!config.metaAppId || !config.metaAppSecret) return null
+    const exchangeUrl = new URL(`${graphBase}/oauth/access_token`)
+    exchangeUrl.searchParams.set('grant_type', 'fb_exchange_token')
+    exchangeUrl.searchParams.set('client_id', config.metaAppId)
+    exchangeUrl.searchParams.set('client_secret', config.metaAppSecret)
+    exchangeUrl.searchParams.set('fb_exchange_token', userToken)
+    const exchanged = await fetchFn(exchangeUrl, { method: 'GET' })
+    if (!exchanged.ok) return null
+    const longLivedUserToken = (await exchanged.json())?.access_token
+    if (!longLivedUserToken) return null
+    const page = await readPage(pageId, longLivedUserToken, 'id,name,access_token')
+    return page.access_token ? { page, accessToken: page.access_token } : null
+  }
+
+  const verifyPage = async ({ pageId, accessToken }) => {
+    if (!config.socialTokenEncryptionKey) throw new SocialPermanentError('Configure SOCIAL_TOKEN_ENCRYPTION_KEY before connecting Facebook.')
+    let page
+    let tokenToStore = accessToken
+    try {
+      const longLived = await exchangeForLongLivedPageToken(pageId, accessToken)
+      if (longLived) {
+        page = longLived.page
+        tokenToStore = longLived.accessToken
+      }
+    } catch (error) {
+      if (error instanceof SocialPermanentError && /invalid or expired/u.test(error.message)) throw error
+    }
+    page ||= await readPage(pageId, accessToken)
     if (String(page.id) !== String(pageId) || !page.name) throw new SocialPermanentError('Facebook did not return the requested Page.')
-    return { pageId: String(page.id), pageName: page.name, encryptedAccessToken: encryptSocialToken(accessToken, config.socialTokenEncryptionKey) }
+    return { pageId: String(page.id), pageName: page.name, encryptedAccessToken: encryptSocialToken(tokenToStore, config.socialTokenEncryptionKey) }
   }
 
   const publish = async ({ job, imageBytes, caption }) => {

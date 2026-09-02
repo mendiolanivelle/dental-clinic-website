@@ -11,7 +11,7 @@ import {
   normalizeSocialImage,
   SocialBlockedError,
 } from '../server/social-publishing.js'
-import { decodeSocialImage } from '../server/routes/dentist.js'
+import { combineSocialImages, decodeSocialImage } from '../server/routes/dentist.js'
 
 const settings = {
   clinicName: 'SmileCare Dental Clinic',
@@ -76,6 +76,15 @@ test('social event details type string parameters for PostgreSQL JSON', async ()
   const eventQueries = queries.filter((sql) => sql.includes('jsonb_build_object'))
   assert.equal(eventQueries.length, 2)
   assert.ok(eventQueries.every((sql) => sql.includes('$2::text')))
+})
+
+test('failed social posts can be manually requeued', async () => {
+  let queryText = ''
+  const store = createStore({
+    async query(sql) { queryText = sql; return { rowCount: 1, rows: [{ id: 'post-1' }] } },
+  })
+  assert.equal(await store.retrySocialPost('post-1', new Date()), true)
+  assert.match(queryText, /status = 'failed'/u)
 })
 
 test('social tokens are encrypted and patient posts fail closed without specific consent', () => {
@@ -239,4 +248,37 @@ test('large phone JPEGs reach server-side normalization', () => {
   })
   assert.equal(decoded.bytes.length, bytes.length)
   assert.equal(decoded.originalName, 'iphone-photo.jpg')
+})
+
+test('before-and-after photos are combined into one normalized image', async () => {
+  const [before, after] = await Promise.all(['#e2f0ef', '#176b68'].map((background) => sharp({
+    create: { width: 900, height: 600, channels: 3, background },
+  }).jpeg().toBuffer()))
+  const combined = await combineSocialImages([before, after])
+  const metadata = await sharp(combined).metadata()
+  assert.equal(metadata.format, 'jpeg')
+  assert.ok(combined.length <= 2 * 1024 * 1024)
+  assert.ok((metadata.width || 0) >= 1700)
+})
+
+test('Facebook user tokens are exchanged for long-lived Page tokens when app credentials exist', async () => {
+  const key = Buffer.alloc(32, 4)
+  const requests = []
+  const fetchFn = async (url, options) => {
+    requests.push({ url: String(url), authorization: options?.headers?.authorization })
+    if (String(url).includes('/oauth/access_token')) return Response.json({ access_token: 'long-lived-user-token' })
+    return Response.json({ id: '12345', name: 'SmileCare', access_token: 'long-lived-page-token' })
+  }
+  const publisher = createSocialPublisher({
+    config: {
+      openRouterApiKey: 'openrouter', openRouterTextModel: 'text', openRouterImageModel: 'image',
+      publicOrigin: 'https://example.com', socialTokenEncryptionKey: key,
+      metaGraphVersion: 'v25.0', metaAppId: 'app-id', metaAppSecret: 'app-secret',
+    },
+    storage: null, store: {}, fetchFn,
+  })
+  const page = await publisher.verifyPage({ pageId: '12345', accessToken: 'short-lived-user-token' })
+  assert.equal(decryptSocialToken(page.encryptedAccessToken, key), 'long-lived-page-token')
+  assert.match(requests[0].url, /oauth\/access_token/u)
+  assert.equal(requests[1].authorization, 'Bearer long-lived-user-token')
 })

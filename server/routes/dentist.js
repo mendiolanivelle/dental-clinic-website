@@ -1,3 +1,4 @@
+import sharp from 'sharp'
 import { ipDigest, sha256 } from '../auth.js'
 import { normalizeSocialImage, SocialBlockedError } from '../social-publishing.js'
 
@@ -66,6 +67,23 @@ export const decodeSocialImage = ({ imageBase64, imageMimeType, imageOriginalNam
     bytes,
     originalName: imageOriginalName.split(/[\\/]/u).at(-1).replace(/[^a-zA-Z0-9_. ()-]/gu, '_').slice(0, 160) || 'clinic-photo',
   }
+}
+
+export async function combineSocialImages(images) {
+  const [left, right] = await Promise.all(images.map(async (image) => ({
+    bytes: image,
+    metadata: await sharp(image).metadata(),
+  })))
+  const leftWidth = left.metadata.width || 1
+  const rightWidth = right.metadata.width || 1
+  const height = Math.max(left.metadata.height || 1, right.metadata.height || 1)
+  const composite = await sharp({
+    create: { width: leftWidth + rightWidth, height, channels: 3, background: '#ffffff' },
+  }).composite([
+    { input: left.bytes, left: 0, top: Math.floor((height - (left.metadata.height || height)) / 2) },
+    { input: right.bytes, left: leftWidth, top: Math.floor((height - (right.metadata.height || height)) / 2) },
+  ]).jpeg({ quality: 84, progressive: true }).toBuffer()
+  return normalizeSocialImage(composite)
 }
 
 export default async function dentistRoutes(app, {
@@ -445,7 +463,8 @@ export default async function dentistRoutes(app, {
     schema: {
       body: {
         type: 'object', additionalProperties: false,
-        required: ['submissionId', 'contentType', 'description', 'image'],
+        required: ['submissionId', 'contentType', 'description'],
+        anyOf: [{ required: ['image'] }, { required: ['images'] }],
         properties: {
           submissionId: { type: 'string', format: 'uuid' },
           contentType: { type: 'string', enum: socialContentTypes },
@@ -458,6 +477,18 @@ export default async function dentistRoutes(app, {
               imageBase64: { type: 'string', minLength: 4, maxLength: 28_000_000 },
               imageMimeType: { type: 'string', enum: Object.keys(socialImageSignatures) },
               imageOriginalName: { type: 'string', minLength: 1, maxLength: 255 },
+            },
+          },
+          images: {
+            type: 'array', minItems: 2, maxItems: 2,
+            items: {
+              type: 'object', additionalProperties: false,
+              required: ['imageBase64', 'imageMimeType', 'imageOriginalName'],
+              properties: {
+                imageBase64: { type: 'string', minLength: 4, maxLength: 28_000_000 },
+                imageMimeType: { type: 'string', enum: Object.keys(socialImageSignatures) },
+                imageOriginalName: { type: 'string', minLength: 1, maxLength: 255 },
+              },
             },
           },
           consent: {
@@ -496,11 +527,15 @@ export default async function dentistRoutes(app, {
       coversPublicSocialMedia: true, coversAiProcessing: true,
       subjectIsMinor: false, guardianName: null, grantedAt: now(),
     } : null
-    const decoded = decodeSocialImage(request.body.image)
-    if (!decoded) return reply.code(400).send({ error: { code: 'INVALID_IMAGE', message: 'Upload a valid JPEG, PNG, or WebP photo up to 20 MB.' } })
+    const incomingImages = request.body.images || [request.body.image]
+    if (request.body.contentType === 'before_after' && incomingImages.length !== 2) return reply.code(400).send({ error: { code: 'TWO_IMAGES_REQUIRED', message: 'Before-and-after posts require both photos.' } })
+    if (request.body.contentType !== 'before_after' && incomingImages.length !== 1) return reply.code(400).send({ error: { code: 'ONE_IMAGE_REQUIRED', message: 'Choose one photo for this post.' } })
+    const decodedImages = incomingImages.map(decodeSocialImage)
+    if (decodedImages.some((image) => !image)) return reply.code(400).send({ error: { code: 'INVALID_IMAGE', message: 'Upload a valid JPEG, PNG, or WebP photo up to 20 MB.' } })
     let normalized
     try {
-      normalized = await normalizeSocialImage(decoded.bytes)
+      const normalizedImages = await Promise.all(decodedImages.map(({ bytes }) => normalizeSocialImage(bytes)))
+      normalized = normalizedImages.length === 2 ? await combineSocialImages(normalizedImages) : normalizedImages[0]
     } catch (error) {
       if (error instanceof SocialBlockedError) return reply.code(400).send({ error: { code: 'INVALID_IMAGE', message: error.message } })
       return reply.code(400).send({ error: { code: 'INVALID_IMAGE', message: 'The selected image could not be safely processed.' } })
@@ -517,7 +552,7 @@ export default async function dentistRoutes(app, {
         image: {
           driveFileId,
           mimeType: 'image/jpeg',
-          originalName: decoded.originalName.replace(/\.[^.]+$/u, '').slice(0, 156) + '.jpg',
+          originalName: decodedImages.length === 2 ? 'before-and-after.jpg' : decodedImages[0].originalName.replace(/\.[^.]+$/u, '').slice(0, 156) + '.jpg',
           sha256: sha256(normalized),
         },
         idempotencyKey: request.body.submissionId,

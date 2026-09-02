@@ -156,6 +156,8 @@ OPENROUTER_IMAGE_MODEL=google/gemini-3.1-flash-image
 SOCIAL_DEBUG_MEDICAL_BYPASS_PAGE_ID=<numeric debug Page ID only; leave empty normally>
 SOCIAL_TOKEN_ENCRYPTION_KEY=<output of: openssl rand -base64 32>
 META_GRAPH_VERSION=v25.0
+META_APP_ID=<Meta app ID; optional but recommended for long-lived Page-token exchange>
+META_APP_SECRET=<Meta app secret; server-only, optional but recommended>
 ```
 
 The existing private Google Drive service account and folder are reused for
@@ -164,6 +166,11 @@ ID and Page access token with permission to publish Page posts. Facebook
 passwords must never be entered or stored. Test with a non-production Page and
 keep automatic publishing disabled until OpenRouter, Drive, branding, consent policy,
 and Page permissions have all been verified.
+
+When the Meta app credentials are configured, reconnecting with a valid Meta user
+token automatically exchanges it for a long-lived Page token before storage. Meta
+can still revoke tokens after permission, password, Page-role, or app changes, so
+no access token can be guaranteed permanent.
 
 ## Supabase and Coolify deployment
 

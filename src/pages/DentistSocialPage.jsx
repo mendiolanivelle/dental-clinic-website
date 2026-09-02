@@ -6,20 +6,11 @@ import { formatDateTime, titleCase } from '../format'
 import { prepareSocialImage } from '../socialImage'
 import { randomUuid } from '../uuid'
 
-const types = [
-  ['clinic_team', 'Clinic or team'],
-  ['educational', 'Educational content'],
-  ['facility_equipment', 'Facility or equipment'],
-  ['patient_portrait', 'Patient portrait'],
-  ['before_after', 'Before and after'],
-  ['intraoral_clinical', 'Intraoral or clinical'],
-  ['other', 'Other'],
-]
 const patientTypes = new Set(['patient_portrait', 'before_after', 'intraoral_clinical'])
 const activeStatuses = new Set(['confirmed', 'ai_processing', 'branding', 'automatic_validation', 'publishing'])
 
 const emptyForm = () => ({
-  contentType: 'clinic_team', description: '', file: null,
+  contentType: 'clinic_team', description: '', file: null, afterFile: null,
 })
 
 const statusStyle = (status) => ({
@@ -36,8 +27,10 @@ export default function DentistSocialPage() {
   const [message, setMessage] = useState('')
   const [formError, setFormError] = useState('')
   const preview = useMemo(() => form.file ? URL.createObjectURL(form.file) : null, [form.file])
+  const afterPreview = useMemo(() => form.afterFile ? URL.createObjectURL(form.afterFile) : null, [form.afterFile])
 
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview) }, [preview])
+  useEffect(() => () => { if (afterPreview) URL.revokeObjectURL(afterPreview) }, [afterPreview])
 
   const load = useCallback((quiet = false) => {
     if (!quiet) setState((current) => ({ ...current, loading: true, error: null }))
@@ -57,17 +50,20 @@ export default function DentistSocialPage() {
     event.preventDefault()
     setFormError('')
     setMessage('')
-    if (!form.file) { setFormError('Take or choose a photo first.'); return }
+    const beforeAfter = form.contentType === 'before_after'
+    const files = beforeAfter ? [form.file, form.afterFile] : [form.file]
+    if (files.some((file) => !file)) { setFormError(beforeAfter ? 'Choose both the before and after photos.' : 'Take or choose a photo first.'); return }
     const patientPost = patientTypes.has(form.contentType)
     if (!window.confirm(`${patientPost ? 'By continuing, you confirm the signed patient or guardian paper consent is on file. ' : ''}This photo will be processed using AI, branded for the clinic, automatically validated, and published to ${state.publishing?.pageName || 'the connected Facebook Page'}. Continue?`)) return
     setBusy(true)
     try {
-      const image = await prepareSocialImage(form.file)
+      const images = await Promise.all(files.map((file) => prepareSocialImage(file)))
       await api.createDentistSocialPost({
         submissionId: randomUuid(),
         contentType: form.contentType,
         description: form.description.trim(),
-        image,
+        image: images[0],
+        ...(beforeAfter ? { images } : {}),
       })
       setForm(emptyForm())
       setMessage('Confirmed. The system is now processing and will publish automatically after validation.')
@@ -84,6 +80,7 @@ export default function DentistSocialPage() {
 
   const ready = state.publishing?.configured && state.publishing?.enabled && state.publishing?.pageName
   const patientPost = patientTypes.has(form.contentType)
+  const beforeAfter = form.contentType === 'before_after'
 
   return <>
     <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -97,12 +94,13 @@ export default function DentistSocialPage() {
     <form className="rounded-3xl bg-white p-5 soft-shadow sm:p-7" onSubmit={submit}>
       <div className="grid gap-6 lg:grid-cols-[.9fr_1.1fr]">
         <div>
-          <label className="block text-sm font-extrabold">Take or upload a photo<input accept="image/jpeg,image/png,image/webp" capture="environment" className="mt-3 block w-full text-xs text-ink/55" required type="file" onChange={(event) => setForm({ ...form, file: event.target.files?.[0] || null })} /></label>
-          <div className="mt-4 grid aspect-square place-items-center overflow-hidden rounded-3xl bg-cream text-ink/35">{preview ? <img alt="Selected post preview" className="h-full w-full object-cover" decoding="async" src={preview} /> : <div className="text-center"><Camera className="mx-auto" size={34} /><p className="mt-2 text-xs font-bold">Photo preview</p></div>}</div>
+          <label className="block text-sm font-extrabold">{beforeAfter ? 'Before photo' : 'Take or upload a photo'}<input accept="image/jpeg,image/png,image/webp" capture="environment" className="mt-3 block w-full text-xs text-ink/55" required type="file" onChange={(event) => setForm({ ...form, file: event.target.files?.[0] || null })} /></label>
+          <div className="mt-4 grid aspect-square place-items-center overflow-hidden rounded-3xl bg-cream text-ink/35">{preview ? <img alt={beforeAfter ? 'Before photo preview' : 'Selected post preview'} className="h-full w-full object-cover" decoding="async" src={preview} /> : <div className="text-center"><Camera className="mx-auto" size={34} /><p className="mt-2 text-xs font-bold">{beforeAfter ? 'Before photo preview' : 'Photo preview'}</p></div>}</div>
+          {beforeAfter && <><label className="mt-5 block text-sm font-extrabold">After photo<input accept="image/jpeg,image/png,image/webp" capture="environment" className="mt-3 block w-full text-xs text-ink/55" required type="file" onChange={(event) => setForm({ ...form, afterFile: event.target.files?.[0] || null })} /></label><div className="mt-4 grid aspect-square place-items-center overflow-hidden rounded-3xl bg-cream text-ink/35">{afterPreview ? <img alt="After photo preview" className="h-full w-full object-cover" decoding="async" src={afterPreview} /> : <div className="text-center"><Camera className="mx-auto" size={34} /><p className="mt-2 text-xs font-bold">After photo preview</p></div>}</div></>}
           <p className="mt-3 text-xs leading-5 text-ink/45">Photos are normalized, stripped of location metadata, and compressed to 2 MB or less.</p>
         </div>
         <div>
-          <label className="block text-sm font-extrabold">Content type<select className="input-field mt-2" value={form.contentType} onChange={(event) => setForm({ ...form, contentType: event.target.value })}>{types.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+          <label className="flex items-center gap-3 rounded-2xl bg-cream p-4 text-sm font-extrabold"><input checked={beforeAfter} type="checkbox" onChange={(event) => setForm({ ...form, contentType: event.target.checked ? 'before_after' : 'clinic_team', afterFile: null })} /> This is a before-and-after post</label>
           <label className="mt-5 block text-sm font-extrabold">What should the post say?<textarea className="input-field mt-2 min-h-32" maxLength="2000" placeholder="Example: Welcome our new dental chair and invite patients to book a consultation." required value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>
           {patientPost && <section className="mt-5 rounded-2xl border border-[#d9a57f]/35 bg-[#fff8f2] p-4">
             <p className="text-xs font-bold leading-5 text-[#783e1c]">Keep the signed patient or guardian paper consent at the clinic. Publishing confirms that the signed copy covers Facebook posting and AI processing.</p>

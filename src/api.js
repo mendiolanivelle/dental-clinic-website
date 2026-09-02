@@ -174,4 +174,5 @@ export const api = {
   disconnectAdminFacebookPage: () => request('/api/admin/social/facebook/connection', { method: 'DELETE' }),
   getAdminSocialPosts: () => request('/api/admin/social/posts'),
   removeAdminSocialPost: (id) => request(`/api/admin/social/posts/${id}/remove`, { method: 'POST' }),
+  retryAdminSocialPost: (id) => request(`/api/admin/social/posts/${id}/retry`, { method: 'POST' }),
 }

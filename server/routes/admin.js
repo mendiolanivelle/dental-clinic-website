@@ -406,4 +406,15 @@ export default async function adminRoutes(app, {
     await audit(request, 'admin.social_post_removed', 'social_post', request.params.id)
     return reply.code(204).send()
   })
+
+  app.post('/api/admin/social/posts/:id/retry', {
+    preHandler: requireAdmin, schema: { params: idParams },
+  }, async (request, reply) => {
+    if (!socialPublisher || !await store.retrySocialPost(request.params.id, now())) {
+      return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'That failed Facebook post was not found.' } })
+    }
+    await audit(request, 'admin.social_post_retry_requested', 'social_post', request.params.id)
+    socialPublisher.wake()
+    return reply.code(202).send({ queued: true })
+  })
 }
