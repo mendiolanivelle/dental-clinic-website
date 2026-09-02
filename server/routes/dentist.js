@@ -56,11 +56,12 @@ const socialImageSignatures = {
   'image/heic': heicSignature,
   'image/heif': heicSignature,
 }
+export const MAX_SOCIAL_SOURCE_IMAGE_BYTES = 20 * 1024 * 1024
 
-const decodeSocialImage = ({ imageBase64, imageMimeType, imageOriginalName }) => {
+export const decodeSocialImage = ({ imageBase64, imageMimeType, imageOriginalName }) => {
   if (!/^[A-Za-z0-9+/]+={0,2}$/u.test(imageBase64) || imageBase64.length % 4 !== 0) return null
   const bytes = Buffer.from(imageBase64, 'base64')
-  if (!bytes.length || bytes.length > 2 * 1024 * 1024 || !socialImageSignatures[imageMimeType]?.(bytes)) return null
+  if (!bytes.length || bytes.length > MAX_SOCIAL_SOURCE_IMAGE_BYTES || !socialImageSignatures[imageMimeType]?.(bytes)) return null
   return {
     bytes,
     originalName: imageOriginalName.split(/[\\/]/u).at(-1).replace(/[^a-zA-Z0-9_. ()-]/gu, '_').slice(0, 160) || 'clinic-photo',
@@ -440,7 +441,7 @@ export default async function dentistRoutes(app, {
 
   app.post('/api/dentist/social/posts', {
     preHandler: requireDentist,
-    bodyLimit: 3 * 1024 * 1024,
+    bodyLimit: 28 * 1024 * 1024,
     schema: {
       body: {
         type: 'object', additionalProperties: false,
@@ -454,7 +455,7 @@ export default async function dentistRoutes(app, {
             type: 'object', additionalProperties: false,
             required: ['imageBase64', 'imageMimeType', 'imageOriginalName'],
             properties: {
-              imageBase64: { type: 'string', minLength: 4, maxLength: 2_800_000 },
+              imageBase64: { type: 'string', minLength: 4, maxLength: 28_000_000 },
               imageMimeType: { type: 'string', enum: Object.keys(socialImageSignatures) },
               imageOriginalName: { type: 'string', minLength: 1, maxLength: 255 },
             },
@@ -496,7 +497,7 @@ export default async function dentistRoutes(app, {
       subjectIsMinor: false, guardianName: null, grantedAt: now(),
     } : null
     const decoded = decodeSocialImage(request.body.image)
-    if (!decoded) return reply.code(400).send({ error: { code: 'INVALID_IMAGE', message: 'Upload a valid JPEG, PNG, or WebP photo up to 2 MB.' } })
+    if (!decoded) return reply.code(400).send({ error: { code: 'INVALID_IMAGE', message: 'Upload a valid JPEG, PNG, WebP, HEIC, or HEIF photo up to 20 MB.' } })
     let normalized
     try {
       normalized = await normalizeSocialImage(decoded.bytes)
